@@ -65,6 +65,8 @@ const { MINING_PROPERTIES, getOwnedProperties, buyProperty, upgradeProperty, get
 const {
     DRONE_TIERS,
     DRONE_FLEET_MAX,
+    DRONE_EXPANSION_COSTS,
+    MINING_SITE_IDS,
     WORKER_SPECIALTIES,
     RECIPES,
     getFleet,
@@ -90,8 +92,12 @@ const {
     seasonKey
 } = require('../systems/mining/expansionManager');
 const { logTransaction } = require('../systems/economy/transactionLogger');
+const { isConfiguredChannel } = require('../systems/discord/commandChannel');
 
 const ALLOWED_CHANNEL = '1504562791967756448';
+function isMiningChannel(interaction) {
+    return isConfiguredChannel(interaction, ALLOWED_CHANNEL, 'mining');
+}
 
 function fmt(n) { return Number(n || 0).toLocaleString(); }
 const money = value => `🪙${Number(value || 0).toLocaleString()}`;
@@ -194,6 +200,12 @@ module.exports = {
         // Defer up front — the hub embed does profile/DB reads that could
         // brush Discord's 3-second reply window. openHub answers with editReply.
         await interaction.deferReply();
+        if (!isMiningChannel(interaction)) {
+            const channelId = isConfiguredChannel(interaction, ALLOWED_CHANNEL, 'mining')
+                ? ALLOWED_CHANNEL
+                : require('../systems/discord/commandChannel').configuredChannelId(interaction.guildId, 'mining', ALLOWED_CHANNEL);
+            return interaction.editReply({ content: `❌ Use mining commands in <#${channelId}>.` });
+        }
         ensureUser(interaction.user.id);
         return openHub(interaction);
     },
@@ -1017,20 +1029,18 @@ async function buildSectionView(interaction, section) {
         const rows = [];
         if (fleet.length) {
             const profile = getMiningProfile(userId);
-            const assignMenu = new StringSelectMenuBuilder()
+            // Discord select menus cap at 25 options. Provide a two-stage
+            // picker so every fleet member and every unlocked site is reachable,
+            // even when the full drone×location matrix exceeds that limit.
+            const droneMenu = new StringSelectMenuBuilder()
                 .setCustomId(`mining-drone-station:${userId}`)
-                .setPlaceholder('Station a drone at a site…')
-                .addOptions(fleet.flatMap((drone, index) => {
-                    const tier = DRONE_TIERS.find(item => item.tier === drone.tier);
-                    return Object.entries(locations)
-                        .filter(([id]) => profile.unlockedLocations.includes(id))
-                        .map(([id, loc]) => ({
-                            label: `#${index + 1} → ${loc.name}`.slice(0, 100),
-                            description: drone.assignedLocation === id ? 'Already stationed here' : `Tier ${drone.tier} drone`,
-                            value: `${index + 1}:${id}`
-                        }));
-                }).slice(0, 25));
-            rows.push(new ActionRowBuilder().addComponents(assignMenu));
+                .setPlaceholder('Choose which drone to station…')
+                .addOptions(fleet.map((drone, index) => ({
+                    label: `#${index + 1} ${DRONE_TIERS.find(item => item.tier === drone.tier)?.name ?? `Tier ${drone.tier}`}`.slice(0, 100),
+                    description: drone.assignedLocation ? `Current site: ${locations[drone.assignedLocation]?.name || drone.assignedLocation}`.slice(0, 100) : 'Currently idle',
+                    value: String(index + 1)
+                })));
+            rows.push(new ActionRowBuilder().addComponents(droneMenu));
             const recallMenu = new StringSelectMenuBuilder()
                 .setCustomId(`mining-drone-recall:${userId}`)
                 .setPlaceholder('Recall a drone…')
@@ -1042,11 +1052,21 @@ async function buildSectionView(interaction, section) {
             rows.push(new ActionRowBuilder().addComponents(recallMenu));
         }
         const wallet = db.prepare('SELECT wallet FROM users WHERE userId = ?').get(userId)?.wallet || 0;
-        rows.push(new ActionRowBuilder().addComponents(
-            DRONE_TIERS.map(tier => opButton(userId, 'drone-buy', `Tier ${tier.tier} — ${money(tier.cost)}`,
-                tier.cost > wallet ? ButtonStyle.Secondary : ButtonStyle.Success,
-                String(tier.tier), tier.cost > wallet))
-        ));
+        const nextDroneTier = fleet.length === 0 ? 1 : summary.tier;
+        const upgradeTier = fleet.length > 0 ? summary.tier + 1 : null;
+        const droneButtons = [nextDroneTier, upgradeTier]
+            .filter((tier, index, list) => tier && list.indexOf(tier) === index)
+            .map(tier => {
+                const config = DRONE_TIERS.find(item => item.tier === tier);
+                if (!config) return null;
+                const addingUnit = fleet.length > 0 && tier === summary.tier;
+                const cost = addingUnit ? (DRONE_EXPANSION_COSTS[fleet.length + 1] ?? config.cost) : config.cost;
+                return opButton(userId, 'drone-buy', `${addingUnit ? 'Add drone' : 'Upgrade fleet'} · ${config.name} · ${money(cost)}`,
+                    cost <= wallet ? ButtonStyle.Success : ButtonStyle.Secondary,
+                    String(tier), cost > wallet || (addingUnit && fleet.length >= DRONE_FLEET_MAX));
+            })
+            .filter(Boolean);
+        if (droneButtons.length) rows.push(new ActionRowBuilder().addComponents(droneButtons));
         rows.push(backRow(userId));
         return { embed, rows };
     }
@@ -1341,8 +1361,56 @@ async function handleComponent(interaction) {
         if (interaction.customId !== `mining-drone-station:${userId}`) {
             return interaction.reply({ content: 'This mining panel is not yours.', ephemeral: true });
         }
-        const [numStr, locationId] = interaction.values[0].split(':');
+        const value = interaction.values[0];
         await interaction.deferUpdate();
+        if (!/^[0-9]+$/.test(value) && !/^[0-9]+:[a-z0-9_-]+$/.test(value)) {
+            return interaction.editReply({ content: '❌ Invalid drone station selection.' });
+        }
+        if (!value.includes(':')) {
+            const droneNumber = Number(value);
+            const fleet = getFleet(userId);
+            const drone = fleet[droneNumber - 1];
+            if (!drone) return interaction.editReply({ content: '❌ That drone is no longer in your hangar.' });
+            const profile = getMiningProfile(userId);
+            const occupiedSites = new Set(fleet
+                .filter(item => item.droneId !== drone.droneId && item.assignedLocation)
+                .map(item => item.assignedLocation));
+            const siteOptions = Object.entries(locations)
+                .filter(([id, loc]) => MINING_SITE_IDS.includes(id) && profile.unlockedLocations.includes(id) && loc.levelRequired <= profile.miningLevel)
+                .map(([id, loc]) => ({
+                    id,
+                    label: `${drone.assignedLocation === id ? '✅ ' : ''}${loc.name}`.slice(0, 100),
+                    description: occupiedSites.has(id) ? 'Occupied by another drone' : drone.assignedLocation === id ? 'Currently stationed here' : `Station Drone #${droneNumber} here`.slice(0, 100),
+                    value: `${droneNumber}:${id}`,
+                    default: drone.assignedLocation === id
+                }))
+                .filter(option => !occupiedSites.has(option.id));
+            if (!siteOptions.length) return interaction.editReply({ content: '❌ No unlocked, unoccupied mining sites are available.' });
+            const siteMenu = new StringSelectMenuBuilder()
+                .setCustomId(`mining-drone-station:${userId}`)
+                .setPlaceholder(`Choose a site for Drone #${droneNumber}…`)
+                .addOptions(siteOptions);
+            const view = await buildSectionView(interaction, 'fleet');
+            return interaction.editReply({
+                embeds: [view.embed, new EmbedBuilder().setColor(0x00d4ff).setTitle(`📍 Station Drone #${droneNumber}`).setDescription(`Choose an unlocked site for Drone #${droneNumber}.`)],
+                components: [new ActionRowBuilder().addComponents(siteMenu), ...view.rows.slice(-1)]
+            });
+        }
+        const [numStr, locationId] = value.split(':');
+        const droneNumber = Number(numStr);
+        const fleet = getFleet(userId);
+        if (!fleet[droneNumber - 1]) return interaction.editReply({ content: '❌ That drone is no longer in your hangar.' });
+        if (!Number.isInteger(droneNumber) || droneNumber < 1 || !locations[locationId]) {
+            return interaction.editReply({ content: '❌ Invalid drone or mining site selection.' });
+        }
+        const profile = getMiningProfile(userId);
+        if (!profile.unlockedLocations.includes(locationId)) {
+            return interaction.editReply({ content: '❌ That mining site is not unlocked.' });
+        }
+        const selectedLocation = locations[locationId];
+        if (!selectedLocation || selectedLocation.levelRequired > profile.miningLevel) {
+            return interaction.editReply({ content: '❌ That mining site is not available at your current level.' });
+        }
         const result = assignDrone(userId, locationId, parseInt(numStr, 10));
         const view = await buildSectionView(interaction, 'fleet');
         if (result.ok) {
@@ -1351,7 +1419,7 @@ async function handleComponent(interaction) {
                 components: view.rows
             });
         } else {
-            await interaction.editReply({ content: `❌ ${result.message}` });
+            await interaction.editReply({ embeds: [view.embed, new EmbedBuilder().setColor(0xff5577).setDescription(`❌ ${result.message}`)], components: view.rows });
         }
         return;
     }

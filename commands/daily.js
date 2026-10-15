@@ -96,6 +96,25 @@ module.exports = {
         }
 
         await interaction.deferReply();
+
+        // Reject an already-claimed date before rendering the timed vault
+        // animation. A duplicate must never strand the user's message on the
+        // 60% frame while replacing only its text.
+        const preflightUser = getUser(interaction.user.id);
+        const preflightNow = new Date();
+        const preflightToday = getEasternCalendar(preflightNow).key;
+        const preflightLastClaim = preflightUser.dailyLastClaim
+            ? getEasternCalendar(new Date(preflightUser.dailyLastClaim)).key
+            : null;
+        if (preflightLastClaim === preflightToday) {
+            return interaction.editReply({
+                content: '🌌 You already collected today’s cosmic signal.',
+                embeds: [],
+                components: [],
+                attachments: []
+            });
+        }
+
         const progressEmbed = (title, icon, progress, text) => new EmbedBuilder()
             .setColor(getColor(interaction.user.id, 0x9b5cff))
             .setTitle(formatTitle(interaction.user.id, `✦ ${title} ✦`, title))
@@ -117,7 +136,11 @@ module.exports = {
 
         if (lastClaimKey === today) {
             return interaction.editReply({
-                content: '🌌 You already collected today’s cosmic signal.' });
+                content: '🌌 You already collected today’s cosmic signal.',
+                embeds: [],
+                components: [],
+                attachments: []
+            });
         }
 
         // Remove the old duplicate check since we already have cooldown check above

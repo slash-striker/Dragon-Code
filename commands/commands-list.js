@@ -30,7 +30,7 @@ const COMMAND_CATEGORIES = {
             { name: '/shop', desc: 'Browse or buy items (action picker, autocomplete for buy)' },
             { name: '/inventory', desc: 'View your item and mining inventory' },
             { name: '/open-box', desc: 'Open mystery boxes (mode:auto toggles auto-open)' },
-            { name: '/item-give', desc: 'Give items or stored fish to another user (target, kind, item, amount)' }
+            { name: '/item-give', desc: 'Open the guided embed picker to give shop items or stored fish to another user' }
         ]
     },
     casino: {
@@ -90,7 +90,7 @@ const COMMAND_CATEGORIES = {
         commands: [
             { name: '/credits-give', desc: 'Give coins to a user' },
             { name: '/giveaway', desc: 'Launch an admin-only interactive credit giveaway (staff can reroll the winner)' },
-            { name: '/dragon-admin', desc: '[ADMIN ONLY] Manage dragons, tournaments, market rounds, flash deals, capsules, seasonal gifts, racing, Elo, quests, bounties — config admin-roles/admin-log tune who counts as admin' },
+            { name: '/dragon-admin', desc: '[ADMIN ONLY] One action-picker command for dragons, economy systems, admin roles, and server configuration' },
             { name: '/admin item-give', desc: 'Admin grant an item; action is logged' },
             { name: '/edit', desc: 'Edit a user\'s economy, inventory, daily streak, or XP (pick action)' },
             { name: '/reset', desc: 'Reset a user\'s economy, stats, wallet, inventory, or XP (confirmation required; everyone flag for wallet/inventory/xp)' },

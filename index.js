@@ -11,6 +11,7 @@ const { getUser, updateUser } = require("./systems/economy/userManager");
 const { initTransactionsTable } = require("./systems/economy/transactionLogger");
 const { initCooldownsTable, rollbackExpiredCommand } = require("./systems/economy/cooldownManager");
 const { initBankAutomation, runSlashDragonBankCycle } = require("./systems/economy/slashDragonBank");
+const serverConfig = require('./systems/discord/serverConfig');
 const { handleXP, createLevelCard, sendLevelUpCard, giveLevelRole, checkLevel } = require("./systems/leveling/levelingSystem");
 const {
     COUNTING_CHANNEL_ID,
@@ -536,8 +537,8 @@ client.on(Events.InteractionCreate, async interaction => {
         });
     } else if (interaction.isButton() && interaction.customId.startsWith('job-list:')) {
         handler = client.commands.get('job')?.handleComponent;
-    } else if (interaction.isStringSelectMenu() && interaction.customId.startsWith('item-give-component:')) {
-        // /item-give fish picker (ephemeral select menu).
+    } else if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('item-give-component:')) {
+        // /item-give guided picker (ephemeral menus and pagination buttons).
         handler = client.commands.get('item-give')?.handleComponent;
     } else if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('fish:hub:')) {
         // /fish main-hub menu + cast button — restart-safe, routed through
@@ -648,6 +649,16 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     if (!handler) return;
+
+    if (interaction.isChatInputCommand() && interaction.guildId) {
+        const configuredChannel = serverConfig.getCommandChannel(interaction.guildId, interaction.commandName);
+        if (configuredChannel && configuredChannel !== interaction.channelId) {
+            return interaction.reply({
+                content: `❌ Use **/${interaction.commandName}** in <#${configuredChannel}>.`,
+                ephemeral: true
+            }).catch(() => {});
+        }
+    }
 
     // Check if user has admin role for logging
     const isAdmin = isAuditUser(interaction);

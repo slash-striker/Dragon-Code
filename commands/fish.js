@@ -20,6 +20,7 @@ const {
     EQUIPMENT, MAX_LOCATION_TIER, getEquipment, getAvailableUpgrades, upgrade
 } = require('../systems/economy/fishingManager');
 const { logTransaction } = require('../systems/economy/transactionLogger');
+const { isConfiguredChannel } = require('../systems/discord/commandChannel');
 const dragonManager = require('../systems/dragons/dragonManager');
 const questManager = require('../systems/economy/questManager');
 const fishingTournament = require('../systems/economy/fishingTournament');
@@ -76,7 +77,29 @@ function fishHubRows() {
             .setLabel('Cast Now')
             .setEmoji('🎣')
             .setStyle(ButtonStyle.Primary));
-    return [menuRow, castRow];
+    const utilityRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('fish:hub:back')
+            .setLabel('Fishing hub')
+            .setEmoji('🌊')
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId('fish:hub:inventory')
+            .setLabel('Inventory')
+            .setEmoji('🎒')
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId('fish:hub:shop')
+            .setLabel('Fishing shop')
+            .setEmoji('🛒')
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId('fish:hub:tournament')
+            .setLabel('Tournament')
+            .setEmoji('🏆')
+            .setStyle(ButtonStyle.Secondary)
+    );
+    return [menuRow, castRow, utilityRow];
 }
 
 /* The session functions reply() as if they were a fresh slash command —
@@ -116,30 +139,40 @@ function facadeForHubComponent(interaction) {
         client: interaction.client,
         channel: interaction.channel,
         channelId: interaction.channelId,
-        options: { getString: () => null, getInteger: () => null, getUser: () => null, getBoolean: () => null },
+        options: {
+            getString: name => name === 'gear' ? 'view' : null,
+            getInteger: () => null,
+            getUser: name => name === 'user' ? interaction.user : null,
+            getBoolean: () => null,
+            getChannel: () => null,
+            getRole: () => null
+        },
         customId: interaction.customId,
         createdTimestamp: interaction.createdTimestamp,
         get deferred() { return ack.done; },
         get replied() { return ack.done; },
         deferReply: async () => { await interaction.deferUpdate().catch(() => {}); ack.done = true; },
-        reply: async () => { ack.done = true; return interaction.update({}); },
-        editReply: (...args) => interaction.update(...args),
+        reply: async payload => {
+            ack.done = true;
+            return interaction.update({ ...payload, components: fishHubRows() });
+        },
+        editReply: (...args) => interaction.editReply(...args),
         fetchReply: async () => interaction.message,
         followUp: (...args) => interaction.followUp(...args),
         deferUpdate: async () => interaction.deferUpdate(),
-        update: (...args) => interaction.update(...args)
+        update: (...args) => interaction.update(...args),
+        channelSend: payload => interaction.channel?.send(payload),
+        isComponentFacade: true
     };
 }
 
 async function runFishHub(interaction) {
     await interaction.deferReply();
-    // Bare /fish is now an embed-only terminal — no interactive menu attached.
-    // The action selector on /fish itself (and /fish action:cast) is the path
-    // into a session; this message is a read-only status board that survives
-    // bot restarts because index.js routes every `fish:hub:` interaction back
-    // to handleComponent.
+    // Like /mining, the hub puts its controls on the embed message. The
+    // component IDs are restart-safe and routed by index.js to this module.
     await safeUpdate(interaction, {
-        embeds: [fishHubEmbed(interaction.user.id, interaction.user)]
+        embeds: [fishHubEmbed(interaction.user.id, interaction.user)],
+        components: fishHubRows()
     });
 }
 
@@ -514,6 +547,12 @@ module.exports = {
     DEX_COLLECTOR_MS,
 
     async execute(interaction) {
+        const configured = interaction.guildId
+            ? require('../systems/discord/commandChannel').configuredChannelId(interaction.guildId, 'fishing', null)
+            : null;
+        if (configured && interaction.channelId !== configured) {
+            return interaction.reply({ content: `❌ Use fishing commands in <#${configured}>.`, ephemeral: true });
+        }
         const sub = interaction.options.getString('action');
         if (!sub) {
             // Bare /fish — the main hub embed.
@@ -639,11 +678,15 @@ function buildFishInventoryEmbed(target, page) {
     return { embed, page, pages };
 }
 
-function fishInventoryComponents(userId, page, pages) {
-    return [new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`finv_prev_${userId}_${page}`).setLabel('◀ Prev').setStyle(ButtonStyle.Secondary).setDisabled(page <= 0),
-        new ButtonBuilder().setCustomId(`finv_next_${userId}_${page}`).setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= pages - 1)
+function fishInventoryComponents(userId, page, pages, includeHub = false) {
+    const rows = [new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(includeHub ? `fish:hub:finv_prev_${userId}_${page}` : `finv_prev_${userId}_${page}`).setLabel('◀ Prev').setStyle(ButtonStyle.Secondary).setDisabled(page <= 0),
+        new ButtonBuilder().setCustomId(includeHub ? `fish:hub:finv_next_${userId}_${page}` : `finv_next_${userId}_${page}`).setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= pages - 1)
     )];
+    if (includeHub) rows.push(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('fish:hub:back').setLabel('Back to fishing hub').setEmoji('🌊').setStyle(ButtonStyle.Secondary)
+    ));
+    return rows;
 }
 
 async function runFishInventory(interaction) {
@@ -652,8 +695,10 @@ async function runFishInventory(interaction) {
     const { embed, page, pages } = buildFishInventoryEmbed(target, 0);
     const message = await interaction.editReply({
         embeds: [embed],
-        components: fishInventoryComponents(interaction.user.id, page, pages)
+        components: fishInventoryComponents(interaction.user.id, page, pages, Boolean(interaction.isComponentFacade))
     });
+
+    if (interaction.isComponentFacade) return;
 
     const collector = message.createMessageComponentCollector({
         componentType: ComponentType.Button,
@@ -672,7 +717,7 @@ async function runFishInventory(interaction) {
         const built = buildFishInventoryEmbed(target, next);
         await component.update({
             embeds: [built.embed],
-            components: fishInventoryComponents(interaction.user.id, built.page, built.pages)
+            components: fishInventoryComponents(interaction.user.id, built.page, built.pages, Boolean(interaction.isComponentFacade))
         }).catch(() => {});
     });
 
@@ -687,23 +732,28 @@ async function runFishInventory(interaction) {
 ========================= */
 
 async function runFishingShopLocation(interaction) {
+    if (interaction.isComponentFacade) await interaction.deferReply();
     const result = purchaseNextLocation(interaction.user.id);
-    if (!result.ok) return interaction.reply({ content: `❌ ${result.message}` });
+    if (!result.ok) return interaction.isComponentFacade
+        ? interaction.editReply({ content: `❌ ${result.message}`, components: fishHubRows() })
+        : interaction.reply({ content: `❌ ${result.message}` });
     logTransaction(interaction.user.id, 'fishing_location', -result.price, `Unlocked ${result.location.name}`);
-    return interaction.reply(
-        `🌊 Unlocked **${result.location.emoji} ${result.location.name}** for **🪙${result.price.toLocaleString()}**! ` +
-        `Better waters mean better fish and higher value.`
-    );
+    const payload = { content: `🌊 Unlocked **${result.location.emoji} ${result.location.name}** for **🪙${result.price.toLocaleString()}**! Better waters mean better fish and higher value.` };
+    return interaction.isComponentFacade ? interaction.editReply({ ...payload, components: fishHubRows() }) : interaction.reply(payload);
 }
 
 async function runFishingShop(interaction) {
+    if (interaction.isComponentFacade) await interaction.deferReply();
     const action = interaction.options.getString('gear') ?? 'view';
 
     if (action === 'rod' || action === 'bait' || action === 'net') {
         const result = upgrade(interaction.user.id, action);
-        if (!result.ok) return interaction.reply({ content: `❌ ${result.message}` });
+        if (!result.ok) return interaction.isComponentFacade
+            ? interaction.editReply({ content: `❌ ${result.message}`, components: fishHubRows() })
+            : interaction.reply({ content: `❌ ${result.message}` });
         logTransaction(interaction.user.id, 'fishing_upgrade', -result.price, `Bought ${result.equipment.name}`);
-        return interaction.reply(`✅ Upgraded to **${result.equipment.name}** for **🪙${result.price.toLocaleString()}**.`);
+        const payload = { content: `✅ Upgraded to **${result.equipment.name}** for **🪙${result.price.toLocaleString()}**.` };
+        return interaction.isComponentFacade ? interaction.editReply({ ...payload, components: fishHubRows() }) : interaction.reply(payload);
     }
 
     const equipment = getEquipment(interaction.user.id);
@@ -725,13 +775,15 @@ async function runFishingShop(interaction) {
         '',
         '_Buy with `/fish action:shop gear:rod` (or gear:bait / gear:net)._'
     ];
-    return interaction.reply({
+    const payload = {
         embeds: [new EmbedBuilder()
             .setColor(0xa855f7)
             .setTitle('🎣 FISHING EQUIPMENT SHOP')
             .setDescription(lines.join('\n'))
-            .setFooter({ text: 'Equipment boosts value & rare odds • deeper locations unlock better fish' })]
-    });
+            .setFooter({ text: 'Equipment boosts value & rare odds • deeper locations unlock better fish' })],
+        components: interaction.isComponentFacade ? fishHubRows() : []
+    };
+    return interaction.isComponentFacade ? interaction.editReply(payload) : interaction.reply(payload);
 }
 
 /* =========================
@@ -784,13 +836,17 @@ function buildDexEmbed(userId, page, dex) {
     return { embed, page, pages };
 }
 
-function dexComponents(userId, page, pages) {
+function dexComponents(userId, page, pages, includeHub = false) {
     const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`fdex_prev_${userId}_${page}`).setLabel('◀ Prev').setStyle(ButtonStyle.Secondary).setDisabled(page <= 0),
-        new ButtonBuilder().setCustomId(`fdex_refresh_${userId}_${page}`).setLabel('🔄 Refresh').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(`fdex_next_${userId}_${page}`).setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= pages - 1)
+        new ButtonBuilder().setCustomId(includeHub ? `fish:hub:fdex_prev_${userId}_${page}` : `fdex_prev_${userId}_${page}`).setLabel('◀ Prev').setStyle(ButtonStyle.Secondary).setDisabled(page <= 0),
+        new ButtonBuilder().setCustomId(includeHub ? `fish:hub:fdex_refresh_${userId}_${page}` : `fdex_refresh_${userId}_${page}`).setLabel('🔄 Refresh').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(includeHub ? `fish:hub:fdex_next_${userId}_${page}` : `fdex_next_${userId}_${page}`).setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= pages - 1)
     );
-    return [row];
+    const rows = [row];
+    if (includeHub) rows.push(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('fish:hub:back').setLabel('Back to fishing hub').setEmoji('🌊').setStyle(ButtonStyle.Secondary)
+    ));
+    return rows;
 }
 
 async function runCollectionView(interaction) {
@@ -799,8 +855,10 @@ async function runCollectionView(interaction) {
     const { embed, page, pages } = buildDexEmbed(interaction.user.id, 0, dex);
     const message = await interaction.editReply({
         embeds: [embed],
-        components: dexComponents(interaction.user.id, page, pages)
+        components: dexComponents(interaction.user.id, page, pages, Boolean(interaction.isComponentFacade))
     });
+
+    if (interaction.isComponentFacade) return;
 
     const collector = message.createMessageComponentCollector({
         componentType: ComponentType.Button,
@@ -820,7 +878,7 @@ async function runCollectionView(interaction) {
         const built = buildDexEmbed(interaction.user.id, next, freshDex);
         await component.update({
             embeds: [built.embed],
-            components: dexComponents(interaction.user.id, built.page, built.pages)
+            components: dexComponents(interaction.user.id, built.page, built.pages, Boolean(interaction.isComponentFacade))
         }).catch(() => {});
     });
 
@@ -835,6 +893,7 @@ async function runCollectionView(interaction) {
 ========================= */
 
 async function runFishSell(interaction) {
+    if (interaction.isComponentFacade) return interaction.reply({ content: 'Use `/fish action:sell` to choose a species and quantity.', ephemeral: true });
     /* The `fish` option is autocomplete (not required — it would then be
        demanded for every /fish cast/inventory/shop run). Older deploys did
        still miss it, so answer with a friendly pointer instead of a
@@ -855,6 +914,14 @@ async function runFishSell(interaction) {
 }
 
 async function runFishSellAll(interaction) {
+    if (interaction.isComponentFacade) {
+        await interaction.deferReply();
+        const result = sellAllLocal(interaction.user.id);
+        if (result.fish.length) logTransaction(interaction.user.id, 'fish_sale', result.total, `Sold ${result.fish.length} stored fish`);
+        const payload = { embeds: [new EmbedBuilder().setColor(0x00d4ff).setTitle(result.fish.length ? '💰 FISH SALE RECEIPT' : '🎣 TANK EMPTY')
+            .setDescription(result.fish.length ? `Sold **${result.fish.length} fish** for **🪙${result.total.toLocaleString()}**.` : 'Nothing stored to sell.')], components: fishHubRows() };
+        return interaction.editReply(payload);
+    }
     const result = sellAllLocal(interaction.user.id);
     if (!result.fish.length) return interaction.reply({ content: '🎣 Your collection is empty — nothing stored to sell.' });
     logTransaction(interaction.user.id, 'fish_sale', result.total, `Sold ${result.fish.length} stored fish`);
@@ -925,6 +992,7 @@ const FISH_HUB_QUICK = new Set(['view', 'inventory', 'shop', 'sell-all', 'shop-l
 
 /* 🏆 Live fishing-tournament board, reachable straight from the hub. */
 async function runTournamentView(interaction) {
+    if (interaction.isComponentFacade) await interaction.deferReply();
     const userId = interaction.user.id;
     const live = fishingTournament.getActiveTournament();
     const stats = fishingTournament.getStats(userId);
@@ -973,7 +1041,43 @@ async function runTournamentView(interaction) {
 }
 
 async function handleComponent(interaction) {
+    const userId = interaction.user.id;
     const action = interaction.customId.split(':').slice(1).join(':'); // 'hub:menu' | 'hub:cast' | 'hub:<quick>'
+    if (action === 'hub:back') {
+        await interaction.deferUpdate().catch(() => {});
+        return interaction.editReply({
+            embeds: [fishHubEmbed(interaction.user.id, interaction.user)],
+            components: fishHubRows()
+        });
+    }
+    if (action === 'hub:inventory' || action === 'hub:shop' || action === 'hub:tournament' || action === 'hub:view' || action === 'hub:sell-all') {
+        const picked = action.slice('hub:'.length);
+        const runner = {
+            view: runCollectionView,
+            inventory: runFishInventory,
+            shop: runFishingShop,
+            'sell-all': runFishSellAll,
+            tournament: runTournamentView
+        }[picked];
+        return runner(facadeForHubComponent(interaction));
+    }
+    if (action.startsWith('hub:finv_') || action.startsWith('hub:fdex_')) {
+        const control = action.slice('hub:'.length);
+        const [panelType, verb, ownerId, pageText] = control.split('_');
+        if (!['finv', 'fdex'].includes(panelType) || !['prev', 'next', 'refresh'].includes(verb) || !/^[0-9]+$/.test(ownerId || '') || !Number.isInteger(Number(pageText))) return interaction.deferUpdate().catch(() => {});
+        if (ownerId !== userId) return interaction.reply({ content: 'This fishing panel is not yours.', ephemeral: true });
+        const page = Math.max(0, Number(pageText) || 0);
+        await interaction.deferUpdate();
+        if (verb === 'prev' || verb === 'next' || verb === 'refresh') {
+            if (panelType === 'finv') {
+                const built = buildFishInventoryEmbed(interaction.user, page + (verb === 'prev' ? -1 : verb === 'next' ? 1 : 0));
+                return interaction.editReply({ embeds: [built.embed], components: fishInventoryComponents(userId, built.page, built.pages, true) });
+            }
+            const dex = getDex(userId);
+            const built = buildDexEmbed(userId, page + (verb === 'prev' ? -1 : verb === 'next' ? 1 : 0), dex);
+            return interaction.editReply({ embeds: [built.embed], components: dexComponents(userId, built.page, built.pages, true) });
+        }
+    }
     if (action === 'hub:cast') {
         // Let the facade own the deferral so update()/editReply() never hit
         // InteractionAlreadyReplied from a double-defer.
@@ -988,9 +1092,10 @@ async function handleComponent(interaction) {
         if (picked === 'cast') {
             return runFishingGame(facadeForHubComponent(interaction));
         }
-        if (picked === 'back') {
-            return runFishHub(facadeForHubComponent(interaction));
+        if (picked === 'shop-location') {
+            return runFishingShopLocation(facadeForHubComponent(interaction));
         }
+
         if (FISH_HUB_QUICK.has(picked)) {
             const runner = {
                 view: runCollectionView,
@@ -1000,11 +1105,7 @@ async function handleComponent(interaction) {
                 'shop-location': runFishingShopLocation,
                 tournament: runTournamentView
             }[picked];
-            if (picked === 'shop-location' || picked === 'shop') {
-                // These act directly through the real interaction (reply()).
-                return runner(interaction);
-            }
-            // Let the facade own the deferral.
+            // Component facade routes the result back to this hub message.
             return runner(facadeForHubComponent(interaction));
         }
         if (picked === 'sell') {

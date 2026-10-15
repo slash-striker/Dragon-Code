@@ -106,35 +106,30 @@ module.exports = { data: new SlashCommandBuilder().setName('blackjack').setDescr
     const sessionId = casino.createSession({ userId: interaction.user.id, game: 'blackjack', channelId: interaction.channelId, payload: game });
     const message = await interaction.editReply({ ...view(game, 'Cards dealt. Choose your move.', interaction.user.id), fetchReply: true });
 
-    // Standard blackjack resolves the naturals immediately, both ways: if
-    // EITHER side opens with 21 the round ends here — previously only the
-    // player natural was checked, so a dealer blackjack dealt a dead hand
-    // the player could never win.
+    // An opening natural is immediate only when the player has Blackjack.
+    // A dealer natural with a non-natural player hand remains visible as one
+    // exposed card until the player's turn is resolved; do not pre-empt play.
     const playerNatural = isBlackjack(game.hands[0].cards);
     const dealerNatural = isBlackjack(game.dealer);
-    if (playerNatural || dealerNatural) {
+    if (playerNatural) {
         game.reveal = true;
-        const bothNatural = playerNatural && dealerNatural;
-        const payout = bothNatural ? bet : playerNatural ? bet * 2.5 : 0;
-        const result = bothNatural ? 'PUSH' : playerNatural ? 'NATURAL BLACKJACK' : 'DEALER BLACKJACK';
-        if (payout > 0) {
-            casino.creditWallet(
-                interaction.user.id,
-                'blackjack',
-                payout,
-                bothNatural ? 'push' : playerNatural ? 'payout' : 'refund',
-                result
-            );
-        }
+        const bothNatural = dealerNatural;
+        const payout = bothNatural ? bet : bet * 2.5;
+        const result = bothNatural ? 'PUSH' : 'NATURAL BLACKJACK';
+        casino.creditWallet(
+            interaction.user.id,
+            'blackjack',
+            payout,
+            bothNatural ? 'push' : 'payout',
+            result
+        );
         casino.closeSession(sessionId, game);
         const resultEmbed = new EmbedBuilder()
-            .setColor(bothNatural ? 0xffcc66 : playerNatural ? 0x00e5a8 : 0xff5577)
-            .setTitle(bothNatural ? '♠ BLACKJACK PUSH' : playerNatural ? '♠ NATURAL BLACKJACK' : '♠ DEALER BLACKJACK')
+            .setColor(bothNatural ? 0xffcc66 : 0x00e5a8)
+            .setTitle(bothNatural ? '♠ BLACKJACK PUSH' : '♠ NATURAL BLACKJACK')
             .setDescription(bothNatural
                 ? 'Both you and the dealer opened with 21. Your wallet wager was returned.'
-                : playerNatural
-                    ? 'You opened with an Ace and a ten-value card. The round ends immediately and your blackjack payout is awarded.'
-                    : 'The dealer opened with 21. The round ends immediately and your wager is lost.')
+                : 'You opened with an Ace and a ten-value card. The round ends immediately and your blackjack payout is awarded.')
             .addFields(
                 { name: 'Dealer', value: `${blackjackValue(game.dealer)}\n${formatCards(game.dealer)}`, inline: true },
                 { name: 'Player', value: `${blackjackValue(game.hands[0].cards)}\n${formatCards(game.hands[0].cards)}`, inline: true },
@@ -146,6 +141,10 @@ module.exports = { data: new SlashCommandBuilder().setName('blackjack').setDescr
     }
 
     const collector = message.createMessageComponentCollector({ componentType: ComponentType.Button, time: 10 * 60 * 1000 });
+    if (dealerNatural) {
+        game.dealerNatural = true;
+        game.dealer = [game.dealer[0], { ...game.dealer[1], hidden: true }];
+    }
     async function resolveHand(hand) {
     while (blackjackValue(game.dealer) < 17) {
         game.dealer.push(game.deck.pop());
@@ -188,24 +187,30 @@ module.exports = { data: new SlashCommandBuilder().setName('blackjack').setDescr
     }
     async function endTwentyOne(i, hand) {
         const blackjack = isBlackjack(hand.cards);
-        const payout = hand.bet * (blackjack ? 2.5 : 2);
+        const dealerHasNatural = Boolean(game.dealerNatural);
+        const payout = dealerHasNatural ? 0 : hand.bet * (blackjack ? 2.5 : 2);
         game.reveal = true;
-        casino.creditWallet(
-            interaction.user.id,
-            'blackjack',
-            payout,
-            'payout',
-            blackjack ? 'Immediate blackjack' : 'Immediate 21'
-        );
+        game.dealer = game.dealer.map(card => { const { hidden, ...visible } = card; return visible; });
+        if (payout > 0) {
+            casino.creditWallet(
+                interaction.user.id,
+                'blackjack',
+                payout,
+                'payout',
+                blackjack ? 'Immediate blackjack' : 'Immediate 21'
+            );
+        }
         casino.closeSession(sessionId, game);
         collector.stop('twenty-one');
         await i.update({
             embeds: [new EmbedBuilder()
                 .setColor(0x00e5a8)
                 .setTitle(blackjack ? '♠ BLACKJACK' : '♠ 21!')
-                .setDescription(blackjack
-                    ? 'You reached Blackjack. The round ended immediately and your blackjack reward was awarded.'
-                    : 'You reached 21. The round ended immediately and your normal win payout was awarded.')
+                .setDescription(dealerHasNatural
+                    ? 'You reached 21, so the round ended. The dealer revealed a natural Blackjack and wins this hand.'
+                    : blackjack
+                        ? 'You reached Blackjack. The round ended immediately and your blackjack reward was awarded.'
+                        : 'You reached 21. The round ended immediately and your normal win payout was awarded.')
                 .addFields(
                     { name: 'Your hand', value: `${blackjackValue(hand.cards)}\n${formatCards(hand.cards)}`, inline: true },
                     { name: 'Payout', value: `🪙${payout.toLocaleString()}`, inline: true }

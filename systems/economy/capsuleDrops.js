@@ -223,7 +223,7 @@ function claimCapsule(capsuleId, userId, now = Date.now()) {
                 };
             }
             if (capsule.status !== 'live' || Number(capsule.endsAt) <= now) {
-                db.prepare(`UPDATE credit_capsules SET status = 'expired' WHERE capsuleId = ? AND status = 'live'`)
+                db.prepare("UPDATE credit_capsules SET status = 'expired' WHERE capsuleId = ? AND status = 'live'")
                     .run(capsuleId);
                 return { ok: false, message: 'That capsule already drifted away.' };
             }
@@ -245,12 +245,38 @@ function claimCapsule(capsuleId, userId, now = Date.now()) {
     }
 }
 
-function expireCapsules(now = Date.now()) {
-    const info = db.prepare(`
-        UPDATE credit_capsules SET status = 'expired'
-        WHERE status = 'live' AND endsAt <= ?
-    `).run(now);
-    return info.changes || 0;
+async function expireCapsules(client, now = Date.now()) {
+    db.prepare("UPDATE credit_capsules SET status = 'expired' WHERE status = 'live' AND endsAt <= ?").run(now);
+    const expired = db.prepare(`
+        SELECT capsuleId, channelId, messageId, status
+        FROM credit_capsules
+        WHERE endsAt <= ? AND messageId IS NOT NULL
+    `).all(now);
+    if (!expired.length) return 0;
+
+    // Delete each announcement at the 15-minute TTL, whether claimed or not.
+    // A transient channel/message fetch failure leaves the ID in place so the
+    // next scheduler tick can retry deletion instead of abandoning the post.
+    let deleted = 0;
+    for (const capsule of expired) {
+        if (!capsule.messageId) continue;
+        try {
+            const channel = await client?.channels?.fetch(capsule.channelId);
+            const message = await channel?.messages?.fetch(capsule.messageId);
+            if (message) {
+                await message.delete();
+                deleted++;
+            }
+            db.prepare('UPDATE credit_capsules SET messageId = NULL WHERE capsuleId = ?').run(capsule.capsuleId);
+        } catch (error) {
+            if (error?.code === 10008 || error?.status === 404) {
+                db.prepare('UPDATE credit_capsules SET messageId = NULL WHERE capsuleId = ?').run(capsule.capsuleId);
+                continue;
+            }
+            console.warn(`Could not delete expired capsule #${capsule.capsuleId}:`, error.message);
+        }
+    }
+    return deleted;
 }
 
 function getActiveCapsules() {

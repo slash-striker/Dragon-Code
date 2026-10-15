@@ -162,8 +162,16 @@ function checkCooldownPings(client) {
 }
 
 // ---- Interest + auto-deposit (nightly) ---------------------------------------
-async function runDailyEconomy(client) {
-    const stamp = `econ:daily:${todayKey()}`;
+async function runDailyEconomy(client, now = new Date()) {
+    // The 60-second ticker can catch the completed UTC day shortly after reset.
+    const completedDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - 24 * 60 * 60 * 1000)
+        .toISOString().slice(0, 10);
+    // Retry while the process is within the first five minutes after midnight;
+    // a per-day stamp makes the wider window idempotent across restarts.
+    if (now.getUTCHours() !== 0 || now.getUTCMinutes() > 5) {
+        return { skipped: true, reason: 'not-end-of-day', interest: 0, interestUsers: 0, deposits: 0 };
+    }
+    const stamp = `econ:daily:${completedDay}`;
     if (metaGet(stamp)) return { skipped: true, interest: 0, interestUsers: 0, deposits: 0 };
 
     const exempt = client && client.guilds
@@ -560,7 +568,7 @@ async function runCapsuleJob(client) {
     } catch (error) {
         return;
     }
-    capsules.expireCapsules();
+    await capsules.expireCapsules(client);
     if (!capsules.isCapsuleDue()) return;
     await capsules.spawnCapsule(client);
 }
@@ -633,7 +641,8 @@ async function runWeeklyJob(client) {
         }
     }
 
-    // 📊 Sunday-night community snapshot.
+    // 📊 Snapshot posting is owned by runDragonExpansionJobs' five-minute
+    // reset window so it cannot be missed between minute ticks.
     if (snapshot?.isSnapshotDue()) {
         await snapshot.postWeeklySnapshot(client);
     }
@@ -683,6 +692,12 @@ async function runDragonExpansionJobs(client) {
     await runCapsuleJob(client);
     await runFlashDealJob();
     await runWeeklyJob(client);
+    try {
+        const snapshot = require('./weeklySnapshot');
+        if (snapshot.isSnapshotDue()) await snapshot.postWeeklySnapshot(client);
+    } catch (error) {
+        console.error('Weekly snapshot job failed:', error.message);
+    }
     try {
         require('./tradeManager').expireStale();
     } catch (error) {

@@ -27,7 +27,10 @@ const DRONE_TIERS = [
     { tier: 2, name: 'Mining Drone', cost: 25000, hourlyYield: 1 },
     { tier: 3, name: 'Swarm Drone', cost: 100000, hourlyYield: 2 },
     { tier: 4, name: 'Titan Drone', cost: 400000, hourlyYield: 2 },
-    { tier: 5, name: 'Leviathan Drone', cost: 1500000, hourlyYield: 3 }
+    { tier: 5, name: 'Leviathan Drone', cost: 1500000, hourlyYield: 3 },
+    { tier: 6, name: 'Celestial Drone', cost: 6000000, hourlyYield: 4 },
+    { tier: 7, name: 'Singularity Drone', cost: 25000000, hourlyYield: 5 },
+    { tier: 8, name: 'Omega Drone', cost: 100000000, hourlyYield: 6 }
 ];
 const DRONE_MAX_HOURS = 8;
 const DRONE_MAX_UNITS_PER_TRIP = 3;
@@ -42,6 +45,7 @@ const DRONE_MAX_UNITS_PER_TRIP = 3;
  */
 const DRONE_FLEET_MAX = 7;
 const DRONE_EXPANSION_COSTS = { 2: 25000, 3: 50000, 4: 100000, 5: 200000, 6: 400000, 7: 800000 };
+const MINING_SITE_IDS = ['quantum_craters', 'cyber_depths', 'frozen_sector', 'lunar_station', 'nexus_core', 'asteroid_belt', 'singularity_rift'];
 
 const WORKER_SPECIALTIES = {
     excavator: { efficiency: 1, cost: 2500 },
@@ -449,6 +453,9 @@ function assignDrone(userId, locationId, droneNumber = null) {
     } else {
         drone = fleet.find(item => !item.assignedLocation) ?? fleet[0];
     }
+    if (!clearing && !MINING_SITE_IDS.includes(locationId)) {
+        return { ok: false, message: 'Unknown mining site.' };
+    }
     if (!clearing) {
         const occupied = fleet.find(item => item.droneId !== drone.droneId && item.assignedLocation === locationId);
         if (occupied) {
@@ -586,7 +593,7 @@ function leaveGuild(userId) {
 
 module.exports = {
     CONTRACT_TEMPLATES, DRONE_TIERS, WORKER_SPECIALTIES, RECIPES, ARTIFACTS, EVENT_TEMPLATES,
-    DRONE_FLEET_MAX, DRONE_EXPANSION_COSTS, DRONE_MAX_HOURS, DRONE_MAX_UNITS_PER_TRIP,
+    DRONE_FLEET_MAX, DRONE_EXPANSION_COSTS, DRONE_MAX_HOURS, DRONE_MAX_UNITS_PER_TRIP, MINING_SITE_IDS,
     ensureExpansionTables, seasonKey, getActiveMiningEvent, getRecentMiningEvents,
     getOrCreateContract, getContracts, claimContract, recordMining, recordCredits,
     getDrone, getFleet, collectDroneOre, buyDrone, assignDrone, getWorkers, hireWorker,
