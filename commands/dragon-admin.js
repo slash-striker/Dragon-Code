@@ -34,6 +34,7 @@ const bounties = require('../systems/economy/bountyManager');
 const reminders = require('../systems/economy/reminders');
 const trades = require('../systems/economy/tradeManager');
 const streak = require('../systems/economy/streakProtection');
+const serverConfig = require('../systems/discord/serverConfig');
 
 const COLOR = 0x9b59b6;
 
@@ -57,234 +58,162 @@ function resolveOreId(input) {
     return oreIds.includes(clean) ? clean : null;
 }
 
+function adaptActionInteraction(interaction, action) {
+    const original = interaction.options;
+    const aliases = {
+        user: 'target',
+        action: 'mode',
+        setting: 'setting-name',
+        'trade-id': 'details',
+        type: 'value', species: 'value', badge: 'value', title: 'value', ore: 'value', item: 'value',
+        source: 'extra', trait: 'details',
+        dragon: 'amount', egg: 'amount', days: 'amount', minutes: 'amount', min: 'amount',
+        level: 'amount2', pot: 'amount2', max: 'amount2',
+        'clear-lock': 'toggle', force: 'toggle', remove: 'toggle', enabled: 'toggle',
+        channel1: 'channel'
+    };
+
+    const options = new Proxy(original, {
+        get(target, property) {
+            const methods = ['getString', 'getInteger', 'getBoolean', 'getUser', 'getRole', 'getChannel'];
+            if (methods.includes(property)) {
+                return (name, required) => {
+                    const mapped = aliases[name] || name;
+                    const value = target[property](mapped, false);
+                    if (required && (value === null || value === undefined)) {
+                        throw new Error(`Missing required /dragon-admin option '${name}' for ${action}.`);
+                    }
+                    return value;
+                };
+            }
+            const value = target[property];
+            return typeof value === 'function' ? value.bind(target) : value;
+        }
+    });
+    return new Proxy(interaction, {
+        get(target, property) {
+            if (property === '__dragonAdminAction') return action;
+            if (property === 'options') return options;
+            const value = Reflect.get(target, property, target);
+            return typeof value === 'function' ? value.bind(target) : value;
+        }
+    });
+}
+
+const DRAGON_ADMIN_ACTIONS = [
+    { name: 'Hatchery · grant egg', value: 'hatchery.grant-egg' },
+    { name: 'Hatchery · give dragon', value: 'hatchery.give-dragon' },
+    { name: 'Hatchery · hatch egg', value: 'hatchery.hatch' },
+    { name: 'Hatchery · set level', value: 'hatchery.set-level' },
+    { name: 'Hatchery · delete dragon', value: 'hatchery.delete' },
+    { name: 'Hatchery · list dragons', value: 'hatchery.list' },
+    { name: 'Run · tournament', value: 'run.tournament' },
+    { name: 'Run · settle tournament', value: 'run.settle-tournament' },
+    { name: 'Run · open market round', value: 'run.market-round' },
+    { name: 'Run · settle market', value: 'run.settle-market' },
+    { name: 'Run · flash deals', value: 'run.flash-deals' },
+    { name: 'Run · drop capsule', value: 'run.capsule' },
+    { name: 'Run · snapshot', value: 'run.snapshot' },
+    { name: 'Run · open race', value: 'run.race-open' },
+    { name: 'Run · settle race', value: 'run.race-settle' },
+    { name: 'Run · Elo promotion', value: 'run.elo-promotion' },
+    { name: 'Reward · badge', value: 'reward.badge' },
+    { name: 'Reward · title', value: 'reward.title' },
+    { name: 'Reward · streak shield', value: 'reward.streak-shield' },
+    { name: 'Reward · seasonal gift', value: 'reward.seasonal-gift' },
+    { name: 'View · status', value: 'view.status' },
+    { name: 'View · bounties', value: 'view.bounties' },
+    { name: 'View · clear bounty', value: 'view.clear-bounty' },
+    { name: 'View · reminders', value: 'view.reminders' },
+    { name: 'View · capsules', value: 'view.capsules' },
+    { name: 'View · trades', value: 'view.trades' },
+    { name: 'View · ladder', value: 'view.ladder' },
+    { name: 'View · races', value: 'view.races' },
+    { name: 'Config · capsule channels', value: 'config.capsule-channels' },
+    { name: 'Config · capsule range', value: 'config.capsule-range' },
+    { name: 'Config · snapshot channel', value: 'config.snapshot-channel' },
+    { name: 'Config · reset Elo', value: 'config.reset-elo' },
+    { name: 'Config · cancel trade', value: 'config.cancel-trade' },
+    { name: 'Config · admin roles', value: 'config.admin-roles' },
+    { name: 'Config · admin log', value: 'config.admin-log' },
+    { name: 'Config · server settings', value: 'config.server' },
+    { name: 'Config · list server settings', value: 'config.server-list' },
+    { name: 'Config · command channel', value: 'config.command-channel' },
+    { name: 'Config · list command channels', value: 'config.command-channels' }
+];
+
 module.exports = {
     data: hideFromMembers(new SlashCommandBuilder())
         .setName('dragon-admin')
-        .setDescription('[ADMIN] Manage dragons, tournaments, market rounds, events and the economy extras')
+        .setDescription('[ADMIN] Manage dragons, economy systems, roles, and server settings')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-
-        // ---------------- HATCHERY ----------------
-        .addSubcommandGroup(group => group
-            .setName('hatchery')
-            .setDescription('Eggs, dragons and incubators')
-            .addSubcommand(sub => sub
-                .setName('grant-egg')
-                .setDescription('Give a player an egg (optionally of a specific type)')
-                .addUserOption(o => o.setName('user').setDescription('Recipient').setRequired(true))
-                .addStringOption(o => o.setName('type').setDescription('Egg id (autocomplete)').setAutocomplete(true))
-                .addStringOption(o => o.setName('source').setDescription('Where it came from (flavour)').setRequired(false)))
-            .addSubcommand(sub => sub
-                .setName('give-dragon')
-                .setDescription('Skip the egg entirely and hand over a hatched pet')
-                .addUserOption(o => o.setName('user').setDescription('Recipient').setRequired(true))
-                .addStringOption(o => o.setName('species').setDescription('Species id (autocomplete)').setAutocomplete(true).setRequired(true))
-                .addStringOption(o => o.setName('trait').setDescription('Primary trait id').setRequired(false)))
-            .addSubcommand(sub => sub
-                .setName('hatch')
-                .setDescription('Force an incubating egg to hatch now')
-                .addIntegerOption(o => o.setName('egg').setDescription('Egg id').setRequired(true)))
-            .addSubcommand(sub => sub
-                .setName('set-level')
-                .setDescription('Set a dragon level and stats')
-                .addIntegerOption(o => o.setName('dragon').setDescription('Dragon id').setRequired(true))
-                .addIntegerOption(o => o.setName('level').setDescription('Level (1-30)').setRequired(true).setMinValue(1).setMaxValue(30)))
-            .addSubcommand(sub => sub
-                .setName('delete')
-                .setDescription('Delete a dragon permanently')
-                .addIntegerOption(o => o.setName('dragon').setDescription('Dragon id').setRequired(true)))
-            .addSubcommand(sub => sub
-                .setName('list')
-                .setDescription('List a player\'s eggs and dragons')
-                .addUserOption(o => o.setName('user').setDescription('Player').setRequired(true)))
-        )
-
-        // ---------------- RUN A SYSTEM RIGHT NOW ----------------
-        .addSubcommandGroup(group => group
-            .setName('run')
-            .setDescription('Trigger a scheduled system immediately')
-            .addSubcommand(sub => sub
-                .setName('tournament')
-                .setDescription('Open a fishing tournament in this channel')
-                .addIntegerOption(o => o.setName('minutes').setDescription('Window length in minutes').setRequired(false).setMinValue(5).setMaxValue(180))
-                .addIntegerOption(o => o.setName('pot').setDescription('Starting pot in credits').setRequired(false).setMinValue(0)))
-            .addSubcommand(sub => sub
-                .setName('settle-tournament')
-                .setDescription('Force-settle the live tournament and pay the podium'))
-            .addSubcommand(sub => sub
-                .setName('market-round')
-                .setDescription('Open a new contrarian market round')
-                .addStringOption(o => o.setName('ore').setDescription('Ore id (autocomplete)').setAutocomplete(true)))
-            .addSubcommand(sub => sub
-                .setName('settle-market')
-                .setDescription('Force-settle the open market round'))
-            .addSubcommand(sub => sub
-                .setName('flash-deals')
-                .setDescription('Re-roll today\'s flash deals')
-                .addBooleanOption(o => o.setName('force').setDescription('Replace existing deals for today').setRequired(false)))
-            .addSubcommand(sub => sub
-                .setName('capsule')
-                .setDescription('Drop a credit capsule right now in this channel'))
-            .addSubcommand(sub => sub
-                .setName('snapshot')
-                .setDescription('Post the weekly economy snapshot now'))
-            .addSubcommand(sub => sub
-                .setName('race-open')
-                .setDescription('Open this week\'s dragon race'))
-            .addSubcommand(sub => sub
-                .setName('race-settle')
-                .setDescription('Run and settle the open dragon race now'))
-            .addSubcommand(sub => sub
-                .setName('elo-promotion')
-                .setDescription('Run the weekly Tic-Tac-Toe Elo promotion'))
-        )
-
-        // ---------------- REWARDS ----------------
-        .addSubcommandGroup(group => group
-            .setName('reward')
-            .setDescription('Hand out badges, titles and protection')
-            .addSubcommand(sub => sub
-                .setName('badge')
-                .setDescription('Award a badge to a player')
-                .addUserOption(o => o.setName('user').setDescription('Player').setRequired(true))
-                .addStringOption(o => o.setName('badge').setDescription('Badge id (autocomplete)').setAutocomplete(true).setRequired(true))
-                .addBooleanOption(o => o.setName('remove').setDescription('Remove it instead of granting')))
-            .addSubcommand(sub => sub
-                .setName('title')
-                .setDescription('Grant or revoke a cosmetic title')
-                .addUserOption(o => o.setName('user').setDescription('Player').setRequired(true))
-                .addStringOption(o => o.setName('title').setDescription('Title id (autocomplete)').setAutocomplete(true).setRequired(true))
-                .addBooleanOption(o => o.setName('remove').setDescription('Revoke it instead of granting')))
-            .addSubcommand(sub => sub
-                .setName('streak-shield')
-                .setDescription('Inject streak-protection days')
-                .addUserOption(o => o.setName('user').setDescription('Player').setRequired(true))
-                .addIntegerOption(o => o.setName('days').setDescription('Days to add (negative to remove)').setRequired(true)))
-            .addSubcommand(sub => sub
-                .setName('seasonal-gift')
-                .setDescription('Give a player today\'s seasonal gift (bypasses the once-a-day lock)')
-                .addUserOption(o => o.setName('user').setDescription('Player').setRequired(true))
-                .addBooleanOption(o => o.setName('clear-lock').setDescription('Clear today\'s claim row first').setRequired(false)))
-        )
-
-        // ---------------- INSPECT ----------------
-        .addSubcommandGroup(group => group
-            .setName('view')
-            .setDescription('Inspect live system state')
-            .addSubcommand(sub => sub.setName('status').setDescription('Show the status of every new subsystem'))
-            .addSubcommand(sub => sub
-                .setName('bounties')
-                .setDescription('Top open bounties'))
-            .addSubcommand(sub => sub
-                .setName('clear-bounty')
-                .setDescription('Wipe the bounty on a target')
-                .addUserOption(o => o.setName('user').setDescription('Target').setRequired(true)))
-            .addSubcommand(sub => sub
-                .setName('reminders')
-                .setDescription('Pending reminders for a player')
-                .addUserOption(o => o.setName('user').setDescription('Player').setRequired(true)))
-            .addSubcommand(sub => sub
-                .setName('capsules')
-                .setDescription('Live capsules (and their channels)'))
-            .addSubcommand(sub => sub
-                .setName('trades')
-                .setDescription('Open trades for a player')
-                .addUserOption(o => o.setName('user').setDescription('Player').setRequired(true)))
-            .addSubcommand(sub => sub
-                .setName('ladder')
-                .setDescription('Current Tic-Tac-Toe Elo ladder'))
-            .addSubcommand(sub => sub
-                .setName('races')
-                .setDescription('Recent dragon race history'))
-        )
-
-        // ---------------- CONFIG ----------------
-        .addSubcommandGroup(group => group
-            .setName('config')
-            .setDescription('Tune the new systems')
-            .addSubcommand(sub => sub
-                .setName('capsule-channels')
-                .setDescription('Set the channels capsules can spawn in')
-                .addChannelOption(o => o.setName('channel1').setDescription('First channel').setRequired(true))
-                .addChannelOption(o => o.setName('channel2').setDescription('Second channel'))
-                .addChannelOption(o => o.setName('channel3').setDescription('Third channel')))
-            .addSubcommand(sub => sub
-                .setName('capsule-range')
-                .setDescription('Set the capsule credit range')
-                .addIntegerOption(o => o.setName('min').setDescription('Minimum credits').setRequired(true).setMinValue(500))
-                .addIntegerOption(o => o.setName('max').setDescription('Maximum credits').setRequired(true).setMinValue(500)))
-            .addSubcommand(sub => sub
-                .setName('snapshot-channel')
-                .setDescription('Set where the weekly snapshot is posted')
-                .addChannelOption(o => o.setName('channel').setDescription('Channel').setRequired(true)))
-            .addSubcommand(sub => sub
-                .setName('reset-elo')
-                .setDescription('Reset a player\'s Tic-Tac-Toe Elo')
-                .addUserOption(o => o.setName('user').setDescription('Player').setRequired(true)))
-            .addSubcommand(sub => sub
-                .setName('cancel-trade')
-                .setDescription('Force-cancel an open trade')
-                .addStringOption(o => o.setName('trade-id').setDescription('Trade id (see /dragon-admin view trades)').setRequired(true)))
-            .addSubcommand(sub => sub
-                .setName('admin-roles')
-                .setDescription('Configure which roles run admin commands and who gets audit-logged')
-                .addStringOption(o => o.setName('action')
-                    .setDescription('List, add, or remove')
-                    .setRequired(true)
-                    .addChoices(
-                        { name: 'List both role sets', value: 'list' },
-                        { name: 'Add a role', value: 'add' },
-                        { name: 'Remove a role', value: 'remove' }
-                    ))
-                .addStringOption(o => o.setName('scope')
-                    .setDescription('Which set to change (default: admin commands)')
-                    .addChoices(
-                        { name: 'Admin commands (run /admin, /reset, …)', value: 'admin' },
-                        { name: 'Audit log (logged as admin activity)', value: 'audit' }
-                    ))
-                .addRoleOption(o => o.setName('role').setDescription('Role to add or remove')))
-            .addSubcommand(sub => sub
-                .setName('admin-log')
-                .setDescription('Turn the admin-activity audit log on or off')
-                .addBooleanOption(o => o.setName('enabled').setDescription('On or off').setRequired(true)))
-        ),
-
+        .addStringOption(o => o.setName('action').setDescription('Choose an admin operation').setRequired(true).setAutocomplete(true))
+        .addUserOption(o => o.setName('target').setDescription('Target player'))
+        .addStringOption(o => o.setName('value').setDescription('Primary value: item, type, ID, or setting key').setAutocomplete(true))
+        .addStringOption(o => o.setName('details').setDescription('Secondary value: note, trait, setting key, trade id, or command name'))
+        .addStringOption(o => o.setName('setting-value').setDescription('Text value for a server setting'))
+        .addStringOption(o => o.setName('setting-name').setDescription('Server setting key').setAutocomplete(true))
+        .addStringOption(o => o.setName('server-setting').setDescription('Server configuration key'))
+        .addStringOption(o => o.setName('server-value').setDescription('Server value for this setting'))
+        .addStringOption(o => o.setName('setting-kind').setDescription('Setting to configure').addChoices(
+            { name: 'Server setting', value: 'server' },
+            { name: 'Command channel', value: 'command-channel' },
+            { name: 'Game-ping role', value: 'game-ping-role' },
+            { name: 'Staff sender role', value: 'staff-sender-role' },
+            { name: 'Staff recipient role 1', value: 'staff-recipient-1' },
+            { name: 'Staff recipient role 2', value: 'staff-recipient-2' },
+            { name: 'Staff recipient role 3', value: 'staff-recipient-3' }
+        ))
+        .addRoleOption(o => o.setName('ping-role').setDescription('Role for a staff/game ping'))
+        .addStringOption(o => o.setName('extra').setDescription('Source text or value for a server setting'))
+        .addIntegerOption(o => o.setName('amount').setDescription('Primary number: id, days, minutes, or minimum'))
+        .addIntegerOption(o => o.setName('amount2').setDescription('Secondary number: level, pot, or maximum'))
+        .addBooleanOption(o => o.setName('toggle').setDescription('Optional action toggle (remove, force, clear-lock)'))
+        .addStringOption(o => o.setName('mode').setDescription('Admin role action: list, add, remove'))
+        .addStringOption(o => o.setName('scope').setDescription('Admin role or server-setting scope').addChoices(
+            { name: 'Admin-command roles', value: 'admin' },
+            { name: 'Audit-log roles', value: 'audit' },
+            { name: 'Channel setting', value: 'channel' },
+            { name: 'Role setting', value: 'role' },
+            { name: 'Server value setting', value: 'server' }
+        ))
+        .addChannelOption(o => o.setName('channel').setDescription('Channel setting or first capsule channel'))
+        .addChannelOption(o => o.setName('channel2').setDescription('Second capsule channel'))
+        .addChannelOption(o => o.setName('channel3').setDescription('Third capsule channel'))
+        .addRoleOption(o => o.setName('role').setDescription('Role to configure')),
     async autocomplete(interaction) {
         if (!isAdminUser(interaction)) return interaction.respond([]);
-        const focused = interaction.options.getFocused().toLowerCase();
-        const which = interaction.options.getSubcommand();
+        const focused = interaction.options.getFocused(true);
+        const action = focused.name === 'action'
+            ? String(focused.value || '')
+            : String(interaction.options.getString('action') || '');
         let choices = [];
 
-        if (which === 'grant-egg') {
-            choices = Object.values(hatchery.EGG_TYPES).map(egg => ({
-                name: `${egg.name} (${egg.rarity}, ${egg.side})`.slice(0, 100),
-                value: egg.id
-            }));
-        } else if (which === 'give-dragon') {
-            choices = Object.values(hatchery.SPECIES).map(species => ({
-                name: `${species.name} (${species.rarity}, ${species.side})`.slice(0, 100),
-                value: species.id
-            }));
-        } else if (which === 'badge') {
-            choices = (quests.BADGES || []).map(badge => ({
-                name: `${badge.name} — ${badge.id}`.slice(0, 100),
-                value: badge.id
-            }));
-        } else if (which === 'title') {
-            choices = titles.TITLES.map(title => ({
-                name: `${title.name} — ${title.id}`.slice(0, 100),
-                value: title.id
-            }));
-        } else if (which === 'market-round') {
-            choices = Object.keys(require('../systems/mining/oreTables').BASE_ORE_VALUES || {}).map(ore => ({
-                name: ore.replace(/_/g, ' '),
-                value: ore
-            }));
+        if (focused.name === 'action') {
+            choices = DRAGON_ADMIN_ACTIONS;
+        } else if (focused.name === 'setting-name') {
+            choices = ['mining', 'fishing', 'economy', 'counting', 'capsules', 'snapshot', 'admin-log']
+                .map(name => ({ name, value: name }));
+        } else if (focused.name === 'setting-value' || focused.name === 'value') {
+            const [group, sub] = action.split('.');
+            if (group === 'hatchery' && sub === 'grant-egg') {
+                choices = Object.values(hatchery.EGG_TYPES).map(egg => ({ name: `${egg.name} (${egg.rarity}, ${egg.side})`, value: egg.id }));
+            } else if (group === 'hatchery' && sub === 'give-dragon') {
+                choices = Object.values(hatchery.SPECIES).map(species => ({ name: `${species.name} (${species.rarity}, ${species.side})`, value: species.id }));
+            } else if (group === 'reward' && sub === 'badge') {
+                choices = (quests.BADGES || []).map(badge => ({ name: `${badge.name} — ${badge.id}`, value: badge.id }));
+            } else if (group === 'reward' && sub === 'title') {
+                choices = titles.TITLES.map(title => ({ name: `${title.name} — ${title.id}`, value: title.id }));
+            } else if (group === 'run' && sub === 'market-round') {
+                choices = Object.keys(require('../systems/mining/oreTables').BASE_ORE_VALUES || {}).map(ore => ({ name: ore.replace(/_/g, ' '), value: ore }));
+            }
         }
 
-        const filtered = choices.filter(choice =>
-            choice.name.toLowerCase().includes(focused) || choice.value.includes(focused)
-        ).slice(0, 25);
-        return interaction.respond(filtered);
+        const query = String(focused.value || '').toLowerCase();
+        return interaction.respond(choices
+            .filter(choice => !query || choice.name.toLowerCase().includes(query) || String(choice.value).toLowerCase().includes(query))
+            .slice(0, 25)
+            .map(choice => ({ name: choice.name.slice(0, 100), value: choice.value })));
     },
 
     async execute(interaction) {
@@ -293,21 +222,20 @@ module.exports = {
         }
         await interaction.deferReply({ flags: 64 });
 
-        const group = interaction.options.getSubcommandGroup(false);
-        const sub = interaction.options.getSubcommand();
-
+        const selected = interaction.options.getString('action', true);
+        const [group, sub] = selected.split('.');
+        const adapted = adaptActionInteraction(interaction, selected);
         try {
-            if (group === 'hatchery') return await runHatchery(interaction, sub);
-            if (group === 'run') return await runSystems(interaction, sub);
-            if (group === 'reward') return await runReward(interaction, sub);
-            if (group === 'view') return await runView(interaction, sub);
-            if (group === 'config') return await runConfig(interaction, sub);
-            return interaction.editReply({ embeds: [ok('Dragon Admin', ['Unknown subcommand.'])], flags: 64 });
+            if (group === 'hatchery') return await runHatchery(adapted, sub);
+            if (group === 'run') return await runSystems(adapted, sub);
+            if (group === 'reward') return await runReward(adapted, sub);
+            if (group === 'view') return await runView(adapted, sub);
+            if (group === 'config') return await runConfig(adapted, sub);
+            return interaction.editReply({ embeds: [ok('Dragon Admin', ['Choose an available action.'])] });
         } catch (error) {
             console.error('dragon-admin failed:', error);
             return interaction.editReply({
-                embeds: [ok('Dragon Admin — ERROR', [`'${error.message || error}'`])],
-                flags: 64
+                embeds: [ok('Dragon Admin — ERROR', [`${error.message || error}`])]
             });
         }
     }
@@ -543,8 +471,9 @@ async function runSystems(interaction, sub) {
         const result = await snapshot.postWeeklySnapshot(interaction.client);
         if (result.ok) return interaction.editReply({ embeds: [ok('Snapshot posted', [`Week **${result.week}** posted to <#${snapshot.getSnapshotChannel()}>.`])] });
         const built = snapshot.buildWeeklySnapshot();
+        const preview = snapshot.buildSnapshotEmbed(built);
         return interaction.editReply({
-            embeds: [ok('Snapshot', [`⚠️ ${result.message}`, '', 'Preview:', snapshot.buildSnapshotEmbed(built).title])]
+            embeds: [ok('Snapshot preview', [`⚠️ ${result.message}`, '', `**${preview.title}**`, preview.description, ...(preview.fields || []).flatMap(field => [`**${field.name}**`, field.value])])]
         });
     }
 
@@ -827,10 +756,76 @@ async function runConfig(interaction, sub) {
         });
     }
 
+    if (sub === 'server') {
+        if (!interaction.guildId) return interaction.editReply({ embeds: [ok('Server configuration', ['❌ This only works inside a server.'])] });
+        const scope = interaction.options.getString('scope', true);
+        if (!['channel', 'role', 'server'].includes(scope)) {
+            return interaction.editReply({ embeds: [ok('Server configuration', ['❌ Scope must be channel, role, or server.'])] });
+        }
+        const settingKind = interaction.options.getString('setting-kind') || 'server';
+        if (settingKind === 'command-channel') {
+            const commandName = String(interaction.options.getString('details', true)).trim().toLowerCase().replace(/^\//, '');
+            const commandChannel = interaction.options.getChannel('channel', true);
+            if (!/^[a-z0-9-]{1,32}$/.test(commandName)) {
+                return interaction.editReply({ embeds: [ok('Command channel', ['❌ Enter a valid slash-command name.'])] });
+            }
+            serverConfig.setCommandChannel(interaction.guildId, commandName, commandChannel.id);
+            return interaction.editReply({ embeds: [ok('Command channel saved', [`**/${commandName}** → <#${commandChannel.id}>`])] });
+        }
+        const setting = String(settingKind === 'server'
+            ? interaction.options.getString('server-setting', true)
+            : settingKind.replace('-role', '').replace('staff-recipient-', 'staff-ping-recipient-').replace('staff-sender', 'staff-ping-sender'))
+            .trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+        const channel = interaction.options.getChannel('channel');
+        const role = interaction.options.getRole('role');
+        const serverValue = interaction.options.getString('server-value');
+        const pingRole = interaction.options.getRole('ping-role');
+        let selectedValue = scope === 'channel' ? channel?.id : scope === 'role' ? (pingRole?.id || role?.id) : serverValue;
+        if (!setting || !selectedValue) {
+            return interaction.editReply({ embeds: [ok('Server configuration', ['❌ Choose a setting key and provide the matching channel, role, or server value.'])] });
+        }
+        serverConfig.set(interaction.guildId, scope, setting, selectedValue);
+        const display = scope === 'channel' ? `<#${selectedValue}>` : scope === 'role' ? `<@&${selectedValue}>` : `\`${selectedValue}\``;
+        return interaction.editReply({ embeds: [ok('Server configuration saved', [`**${scope}.${setting}** → ${display}`, 'Saved for this server and available through the shared serverConfig module.'])] });
+    }
+
+    if (sub === 'server-list') {
+        if (!interaction.guildId) return interaction.editReply({ embeds: [ok('Server configuration', ['❌ This only works inside a server.'])] });
+        const settings = serverConfig.list(interaction.guildId);
+        const commandChannels = serverConfig.listCommandChannels(interaction.guildId);
+        const lines = [
+            ...settings.map(row => `**${row.scope}.${row.setting}** → ${row.scope === 'channel' ? `<#${row.value}>` : row.scope === 'role' ? `<@&${row.value}>` : `\`${row.value}\``}`),
+            ...commandChannels.map(row => `**/${row.commandName}** → <#${row.channelId}>`)
+        ];
+        return interaction.editReply({ embeds: [ok('Server configuration', lines.length ? lines.slice(0, 80) : ['No server-specific settings saved yet.'])] });
+    }
+
+    if (sub === 'command-channel') {
+        if (!interaction.guildId) return interaction.editReply({ embeds: [ok('Command channel', ['❌ This only works inside a server.'])] });
+        const commandName = String(interaction.options.getString('details', true)).trim().toLowerCase().replace(/^\//, '');
+        const channel = interaction.options.getChannel('channel', true);
+        if (!/^[a-z0-9-]{1,32}$/.test(commandName)) {
+            return interaction.editReply({ embeds: [ok('Command channel', ['❌ Enter a valid slash-command name.'])] });
+        }
+        serverConfig.setCommandChannel(interaction.guildId, commandName, channel.id);
+        return interaction.editReply({ embeds: [ok('Command channel saved', [`**/${commandName}** is now limited to <#${channel.id}> in this server.`])] });
+    }
+
+    if (sub === 'command-channels') {
+        if (!interaction.guildId) return interaction.editReply({ embeds: [ok('Command channels', ['❌ This only works inside a server.'])] });
+        const rows = serverConfig.listCommandChannels(interaction.guildId);
+        return interaction.editReply({ embeds: [ok('Configured command channels', rows.length
+            ? rows.map(row => `**/${row.commandName}** → <#${row.channelId}>`)
+            : ['No per-command channel overrides set.'])] });
+    }
+
     if (sub === 'admin-roles') {
         const action = interaction.options.getString('action', true);
         const scope = interaction.options.getString('scope') ?? 'admin';
         const role = interaction.options.getRole('role');
+        if (!['admin', 'audit'].includes(scope)) {
+            return interaction.editReply({ embeds: [ok('Admin configuration', ['❌ Choose admin-command roles or audit-log roles.'])] });
+        }
         const getIds = scope === 'audit' ? adminVisibility.getAuditRoleIds : adminVisibility.getAdminRoleIds;
         const setIds = scope === 'audit' ? adminVisibility.setAuditRoleIds : adminVisibility.setAdminRoleIds;
         const scopeLabel = scope === 'audit' ? 'Audit-log roles' : 'Admin-command roles';

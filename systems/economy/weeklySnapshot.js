@@ -77,12 +77,16 @@ function safeAll(sql, params = []) {
 }
 
 function buildWeeklySnapshot(now = Date.now()) {
-    const since = now - WEEK_MS;
+    const snapshotDate = new Date(now);
+    const end = snapshotDate.getUTCDay() === 1 && snapshotDate.getUTCHours() === 0
+        ? Date.UTC(snapshotDate.getUTCFullYear(), snapshotDate.getUTCMonth(), snapshotDate.getUTCDate())
+        : now;
+    const since = end - WEEK_MS;
     const sinceIso = new Date(since).toISOString();
 
     const moved = safeGet(
-        'SELECT COALESCE(SUM(amount), 0) AS total FROM transactions WHERE amount > 0 AND timestamp >= ?',
-        [since]
+        'SELECT COALESCE(SUM(amount), 0) AS total FROM transactions WHERE amount > 0 AND timestamp >= ? AND timestamp < ?',
+        [since, end]
     );
 
     const richest = safeGet(`
@@ -96,20 +100,20 @@ function buildWeeklySnapshot(now = Date.now()) {
     const robbed = safeGet(`
         SELECT userId, COUNT(*) AS hits, COALESCE(SUM(amount), 0) AS amount
         FROM transactions
-        WHERE amount < 0 AND timestamp >= ?
+        WHERE amount < 0 AND timestamp >= ? AND timestamp < ?
           AND (LOWER(COALESCE(type, '')) LIKE '%rob%' OR LOWER(COALESCE(description, '')) LIKE '%rob%')
         GROUP BY userId
         ORDER BY hits DESC
         LIMIT 1
-    `, [since]);
+    `, [since, end]);
 
     const biggestFish = safeGet(`
         SELECT userId, name, rarity, value, caughtAt
         FROM fishing_inventory
-        WHERE caughtAt >= ?
+        WHERE caughtAt >= ? AND caughtAt < ?
         ORDER BY value DESC
         LIMIT 1
-    `, [sinceIso]);
+    `, [sinceIso, new Date(end).toISOString()]);
 
     const bestMiningGuild = safeGet(`
         SELECT name, totalOre, totalCredits
@@ -132,21 +136,25 @@ function buildWeeklySnapshot(now = Date.now()) {
         if (row.side === 'evil') sideStandings.evil = Number(row.total || 0);
     }
 
+    const weekEndingDate = new Date(end - 1);
+    const week = weekKey(weekEndingDate);
+    const season = seasonKey(weekEndingDate);
+
     const topMiners = safeAll(`
         SELECT userId, oreMined
         FROM mining_season_stats
         WHERE season = ?
         ORDER BY oreMined DESC
         LIMIT 3
-    `, [seasonKey(new Date(now))]);
+    `, [season]);
 
     const bountyRow = safeGet('SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS holders FROM bounties');
 
     return {
-        week: weekKey(new Date(now)),
-        season: seasonKey(new Date(now)),
+        week,
+        season,
         since,
-        until: now,
+        until: end,
         creditsMoved: Number(moved?.total || 0),
         richest: richest
             ? {
@@ -269,7 +277,7 @@ function buildSnapshotEmbed(snapshot) {
  * throwing whenever the channel is unavailable or the week already went out.
  */
 async function postWeeklySnapshot(client, now = Date.now()) {
-    const week = weekKey(new Date(now));
+    const week = buildWeeklySnapshot(now).week;
     if (metaGet(`snapshot:posted:${week}`)) {
         return { ok: false, message: `The ${week} snapshot was already posted.`, week };
     }
@@ -295,7 +303,7 @@ async function postWeeklySnapshot(client, now = Date.now()) {
     if (payload.fields.length) embed.addFields(payload.fields);
 
     try {
-        await channel.send({ embeds: [embed] });
+        await channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
     } catch (error) {
         return { ok: false, message: `Could not post the snapshot: ${error.message}`, week };
     }
@@ -304,14 +312,15 @@ async function postWeeklySnapshot(client, now = Date.now()) {
     return { ok: true, message: `Posted the ${week} snapshot.`, week };
 }
 
-/* Sundays (UTC) only, and only while this week has not been posted yet. */
+/* Monday 00:00 UTC reset boundary; report the week that just ended. */
 function isSnapshotDue(now = Date.now(), date = new Date(now)) {
-    if (date.getUTCDay() !== 0) return false;
-    return !metaGet(`snapshot:posted:${weekKey(date)}`);
+    if (date.getUTCDay() !== 1 || date.getUTCHours() !== 0 || date.getUTCMinutes() > 59) return false;
+    return !metaGet(`snapshot:posted:${weekKey(new Date(date.getTime() - 1))}`);
 }
 
 module.exports = {
     SNAPSHOT_CHANNEL_DEFAULT,
+    BOT_ACCOUNT_ID,
     getSnapshotChannel,
     setSnapshotChannel,
     weekKey,

@@ -1,4 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { buildRoleRecipientPings } = require('../systems/discord/rolePingRecipients');
+const serverConfig = require('../systems/discord/serverConfig');
 const {
     getRemainingCooldownMs,
     setPingCooldown,
@@ -32,7 +34,8 @@ module.exports = {
 
   async execute(interaction) {
     // Slashling-only check
-    const hasSlashlingRole = interaction.member.roles.cache.has(SLASHLING_ROLE);
+    const slashlingRoleId = serverConfig.getRoleId(interaction.guildId, 'staff-ping-sender', SLASHLING_ROLE);
+    const hasSlashlingRole = interaction.member.roles.cache.has(slashlingRoleId);
 
     if (!hasSlashlingRole) {
       return interaction.reply({
@@ -50,17 +53,19 @@ module.exports = {
     }
 
     const staffRoles = [
-      '1504365030877954162',
-      '1504365030877954160',
-      '1504365030877954161'
+      serverConfig.getRoleId(interaction.guildId, 'staff-ping-recipient-1', '1504365030877954162'),
+      serverConfig.getRoleId(interaction.guildId, 'staff-ping-recipient-2', '1504365030877954160'),
+      serverConfig.getRoleId(interaction.guildId, 'staff-ping-recipient-3', '1504365030877954161')
     ];
 
+    await interaction.deferReply();
     const reasonRaw = interaction.options.getString('reason');
     const reason = reasonRaw && reasonRaw.trim().length > 0
       ? reasonRaw.trim()
       : "No reason provided";
 
-    const pingLine = staffRoles.map(id => `<@&${id}>`).join(' ');
+    const rolePing = await buildRoleRecipientPings(interaction.guild, staffRoles, interaction.user.id);
+    const pingLine = rolePing.content;
     const userTag = interaction.user.tag;
     const userId = interaction.user.id;
 
@@ -77,7 +82,7 @@ module.exports = {
         "```"
       );
 
-    await interaction.reply({ embeds: [bootEmbed] });
+    await interaction.editReply({ embeds: [bootEmbed] });
 
     await sleep(1200);
 
@@ -133,7 +138,11 @@ module.exports = {
       .setFooter({ text: 'NEON//STAFF-MATRIX v4.3 • SIGNAL LIVE' })
       .setTimestamp();
 
-    await interaction.editReply({ embeds: [finalEmbed] });
+    await interaction.editReply({
+      embeds: [finalEmbed],
+      content: pingLine,
+      allowedMentions: rolePing.allowedMentions
+    });
 
     // Arm the cooldown only after the ping actually went out.
     setPingCooldown('staff', interaction.user.id);

@@ -7,13 +7,17 @@ const { drills, locations, getBoostBonusOre } = require('../systems/mining/drill
 const { addOre } = require('../systems/mining/inventoryManager');
 const dragonManager = require('../systems/dragons/dragonManager');
 const questManager = require('../systems/economy/questManager');
-const { getWorkers, collectDroneOre, getActiveMiningEvent, recordMining } = require('../systems/mining/expansionManager');
+const { getWorkers, getFleet, DRONE_TIERS, collectDroneOre, getActiveMiningEvent, recordMining } = require('../systems/mining/expansionManager');
 const { getYieldMultiplier, creditPropertyIncome } = require('../systems/mining/propertyManager');
 const { getMiningPrestigeMultiplier, getRarityRollCount } = require('../systems/mining/galaxyManager');
 const { getGuildOreBonus, chargeGuildTithe, payGuildWages } = require('../systems/mining/guildPerks');
 const { logTransaction } = require('../systems/economy/transactionLogger');
+const { isConfiguredChannel, configuredChannelId } = require('../systems/discord/commandChannel');
 
 const ALLOWED_CHANNEL = '1504562791967756448';
+function miningChannelId(interaction) {
+    return configuredChannelId(interaction.guildId, 'mining', ALLOWED_CHANNEL);
+}
 
 // Human string for the embed's Cooldown field: the cadence of the NEXT run,
 // e.g. "3h", "1h 47m", "30m" — NEVER the ready-at timestamp. (That bug once
@@ -37,8 +41,8 @@ module.exports = {
         // embed building and can exceed Discord's 3-second reply window.
         await interaction.deferReply();
 
-        if (interaction.channelId !== ALLOWED_CHANNEL) {
-            return interaction.editReply({ content: `❌ Mining restricted to <#${ALLOWED_CHANNEL}>` });
+        if (!isConfiguredChannel(interaction, ALLOWED_CHANNEL, 'mining')) {
+            return interaction.editReply({ content: `❌ Mining restricted to <#${miningChannelId(interaction)}>` });
         }
 
         ensureUser(interaction.user.id);
@@ -54,6 +58,33 @@ module.exports = {
 
         const drill = drills[profile.activeDrill] || drills.basic_drill;
         const location = locations[profile.activeLocation] || locations.quantum_craters;
+        const workers = getWorkers(interaction.user.id);
+        const fleet = getFleet(interaction.user.id);
+        const droneNames = fleet.length
+            ? fleet.map((drone, index) => `🛸 #${index + 1} ${DRONE_TIERS.find(tier => tier.tier === drone.tier)?.name || 'Drone'} → ${locations[drone.assignedLocation]?.name || (drone.assignedLocation ? drone.assignedLocation : 'hangar')}`)
+            : ['🛸 No drones on this run'];
+        const workerNames = workers.length
+            ? workers.map(worker => `👷 ${worker.name} (${worker.specialty})`)
+            : ['👷 No workers on this run'];
+        const miningFrame = (progress, phase) => new EmbedBuilder()
+            .setColor(0x00d4ff)
+            .setTitle('⛏️ EXTRACTION IN PROGRESS')
+            .setDescription([
+                `**Location:** ${location.name}`,
+                `**Drill:** ${drill.name}`,
+                '',
+                `**${phase}**  \`${'▰'.repeat(progress)}${'▱'.repeat(10 - progress)}\` **${progress * 10}%**`,
+                '',
+                '**Drone crew**', ...droneNames,
+                '',
+                '**Workers**', ...workerNames
+            ].join('\n'));
+        await interaction.editReply({ embeds: [miningFrame(3, 'Powering the drill…')] });
+        await new Promise(resolve => setTimeout(resolve, 450));
+        await interaction.editReply({ embeds: [miningFrame(6, 'Drilling through the site…')] });
+        await new Promise(resolve => setTimeout(resolve, 450));
+        await interaction.editReply({ embeds: [miningFrame(9, 'Collecting the ore…')] });
+        const droneCollection = collectDroneOre(interaction.user.id);
 
         // Galaxy + rebirth rarity shift: roll the location pool N times and
         // keep the rarest result (lowest relative weight) — Roblox-style
@@ -71,8 +102,6 @@ module.exports = {
                 ore = candidate;
             }
         }
-        const droneCollection = collectDroneOre(interaction.user.id);
-        const workers = getWorkers(interaction.user.id);
         const event = getActiveMiningEvent();
 
         let quantity = Math.max(1, Math.floor((1 + Math.random() * 2) * drill.miningEfficiency));

@@ -1,4 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { buildRoleRecipientPings } = require('../systems/discord/rolePingRecipients');
+const serverConfig = require('../systems/discord/serverConfig');
 const {
     getRemainingCooldownMs,
     setPingCooldown,
@@ -41,7 +43,8 @@ module.exports = {
     // ─────────────────────────────
     // ROLE GATE — holders of the game-ping role only
     // ─────────────────────────────
-    const hasGameRole = interaction.member?.roles?.cache?.has(GAME_PING_ROLE_ID);
+    const gamePingRoleId = serverConfig.getRoleId(interaction.guildId, 'game-ping', GAME_PING_ROLE_ID);
+    const hasGameRole = interaction.member?.roles?.cache?.has(gamePingRoleId);
 
     if (!hasGameRole) {
       return interaction.reply({
@@ -67,7 +70,9 @@ module.exports = {
     }
 
     const reason = interaction.options.getString('reason').trim().slice(0, 500);
-    const pingLine = `<@&${GAME_PING_ROLE_ID}>`;
+    await interaction.deferReply();
+    const rolePing = await buildRoleRecipientPings(interaction.guild, [gamePingRoleId], interaction.user.id);
+    const pingLine = rolePing.content;
     const userTag = interaction.user.tag;
     const userId = interaction.user.id;
 
@@ -84,7 +89,7 @@ module.exports = {
         "```"
       );
 
-    await interaction.reply({ embeds: [bootEmbed] });
+    await interaction.editReply({ embeds: [bootEmbed] });
 
     await sleep(1200);
 
@@ -140,7 +145,11 @@ module.exports = {
       .setFooter({ text: 'NEON//GAME-MATRIX v1.0 • SIGNAL LIVE' })
       .setTimestamp();
 
-    await interaction.editReply({ embeds: [finalEmbed] });
+    await interaction.editReply({
+      embeds: [finalEmbed],
+      content: pingLine,
+      allowedMentions: rolePing.allowedMentions
+    });
 
     // Arm the cooldown only after the ping actually went out.
     setPingCooldown('game-pings', interaction.user.id);
