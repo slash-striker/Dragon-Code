@@ -3,6 +3,7 @@ const {
 } = require('discord.js');
 const db = require('../database');
 const quoteLogger = require('../systems/games/quoteLogger');
+const { isUserAsleep } = require('../systems/util/sleepSchedule');
 
 const OWNER_USER_ID = '1466461677783351447';
 const TARGET_USER_ID = '1505829367631183963';
@@ -22,7 +23,7 @@ const KEYWORDS = ['sassy', 'slashstriker', 'slash striker', 'Slashstriker', 'Sla
  * but with NO phrase triggers (so "help me" keeps summoning SLASH, not
  * Light). Checked independently of the slash mute.
  */
-const LIGHT_KEYWORDS = ['light', 'lightning'];
+const LIGHT_KEYWORDS = ['light', "grok", "GROK", "grko", "gork", "orgk"];
 
 /*
  * Multi-word triggers — matched as an exact consecutive word pair/phrase
@@ -549,7 +550,9 @@ module.exports = {
              * even while he is online. Fully silenced only via
              * /toggle-ping ping:slash (the 👀 reaction above still fires).
              */
-            if (slashPingEnabled()) {
+            // The host never summons himself, and nothing pings him during his own sleep window.
+            const slashActive = slashPingEnabled() && message.author.id !== OWNER_USER_ID && !isUserAsleep(OWNER_USER_ID);
+            if (slashActive) {
                 const ownerUserPinged = mentionedUserIds.includes(OWNER_USER_ID);
                 const keyword = findKeyword(message.content);
 
@@ -573,8 +576,10 @@ module.exports = {
                     return;
                 }
             } else if (
-                mentionedUserIds.includes(OWNER_USER_ID) ||
-                findKeyword(message.content)
+                message.author.id !== OWNER_USER_ID && (
+                    mentionedUserIds.includes(OWNER_USER_ID) ||
+                    findKeyword(message.content)
+                )
             ) {
                 console.log(
                     '[slash-ping] muted — suppressed a trigger in #' + (message.channel?.name ?? message.channelId)
@@ -590,7 +595,9 @@ module.exports = {
             const lightUserPinged = mentionedUserIds.includes(LIGHT_USER_ID);
             const lightKeyword = findKeyword(message.content, LIGHT_KEYWORDS, [], { exactOnly: true });
 
-            if (lightPingEnabled()) {
+            // Light never summons himself, and nothing pings him during his own sleep window.
+            const lightActive = lightPingEnabled() && message.author.id !== LIGHT_USER_ID && !isUserAsleep(LIGHT_USER_ID);
+            if (lightActive) {
                 if (lightUserPinged) {
                     await message.reply({
                         content: buildMomentaryPanel(null, LIGHT_USER_ID),
@@ -605,7 +612,7 @@ module.exports = {
                         allowedMentions: { users: [LIGHT_USER_ID], parse: [] },
                     }).catch(() => {});
                 }
-            } else if (lightUserPinged || lightKeyword) {
+            } else if (message.author.id !== LIGHT_USER_ID && (lightUserPinged || lightKeyword)) {
                 console.log(
                     '[light-ping] muted — suppressed a trigger in #' + (message.channel?.name ?? message.channelId)
                 );

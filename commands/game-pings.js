@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { buildRoleRecipientPings } = require('../systems/discord/rolePingRecipients');
+const { isUserAsleep } = require('../systems/util/sleepSchedule');
 const serverConfig = require('../systems/discord/serverConfig');
 const {
     getRemainingCooldownMs,
@@ -31,7 +32,7 @@ const ALLOWED_CHANNELS = [
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('game-pings')
-    .setDescription('Ping the Game Ping role for game night')
+    .setDescription('Ping the Game Ping role with a game invite')
     .addStringOption(option =>
       option
         .setName('reason')
@@ -71,7 +72,7 @@ module.exports = {
 
     const reason = interaction.options.getString('reason').trim().slice(0, 500);
     await interaction.deferReply();
-    const rolePing = await buildRoleRecipientPings(interaction.guild, [gamePingRoleId], interaction.user.id);
+    const rolePing = await buildRoleRecipientPings(interaction.guild, [gamePingRoleId], interaction.user.id, 70, isUserAsleep);
     const pingLine = rolePing.content;
     const userTag = interaction.user.tag;
     const userId = interaction.user.id;

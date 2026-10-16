@@ -626,6 +626,30 @@ client.on(Events.InteractionCreate, async interaction => {
         // Rated player-vs-player Tic-Tac-Toe ladder (lives inside /games).
         await client.commands.get('games')?.handleComponent?.(interaction);
         return;
+    } else if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('admin-item:')) {
+        // /admin item-give picker. Grants are audited here, like slash-command runs.
+        await client.commands.get('admin')?.handleComponent?.(interaction);
+        if (interaction.adminCommandDetails) {
+            const auditChannel = interaction.guild?.channels.cache.get('1504365033637806134');
+            await auditChannel?.send({
+                embeds: [new EmbedBuilder()
+                    .setColor(0x00d4ff)
+                    .setTitle('🔐 ADMIN ACTION AUDIT')
+                    .setDescription(`A privileged command was executed in **${interaction.guild?.name ?? 'DM'}**.`)
+                    .addFields(
+                        { name: 'Command', value: '`/admin item-give`', inline: true },
+                        { name: 'Executed by', value: `<@${interaction.user.id}>`, inline: true },
+                        { name: 'Action details', value: interaction.adminCommandDetails }
+                    )
+                    .setFooter({ text: 'NEON ECONOMY CORE • Audit ledger' })
+                    .setTimestamp()]
+            }).catch(() => {});
+        }
+        return;
+    } else if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('uno:')) {
+        // /uno-play table: lobby buttons, the table controls, hand menu and wild colour picks.
+        await client.commands.get('uno-play')?.handleComponent?.(interaction);
+        return;
     } else if (interaction.isButton() && interaction.customId.startsWith('capsule:claim:')) {
         // Random-drop credit capsule: first click wins, no collector needed.
         const capsuleDrops = require('./systems/economy/capsuleDrops');
@@ -635,9 +659,17 @@ client.on(Events.InteractionCreate, async interaction => {
             await interaction.reply({ content: `❌ ${result.message}`, flags: 64 }).catch(() => {});
             return;
         }
+        const amountText = Number(result.amount).toLocaleString();
+        const deleteAt = Date.now() + capsuleDrops.CLAIM_NOTICE_TTL_MS;
+        const selfDestruct = `<t:${Math.floor(deleteAt / 1000)}:R>`;
         await interaction.reply({
-            content: `💠 Capsule cracked — **🪙${Number(result.amount).toLocaleString()}** just landed in your wallet!`
+            content: `💠 Capsule cracked — **🪙${amountText}** just landed in your wallet!`
         }).catch(() => {});
+        const capturedId = await interaction.fetchReply().then(m => m.id).catch(() => null);
+        const claimedId = await interaction.followUp({
+            content: `💠 Capsule for **🪙${amountText}** has already been claimed. This message will self destruct ${selfDestruct}.`
+        }).then(m => m.id).catch(() => null);
+        capsuleDrops.recordClaimNotices(capsuleId, [capturedId, claimedId], deleteAt);
         try {
             await interaction.message.edit({ components: [] });
         } catch (error) {
