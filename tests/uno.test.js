@@ -66,6 +66,9 @@ test('uno: a matching card is legal and a wild requires a colour', () => {
 
 test('uno: a skip in three-player seating skips the next seat', () => {
     const state = uno.createGame({ players: PLAYERS });
+    // A reverse starter would flip the direction before this test sets its own
+    // top card, so pin clockwise play: the test is about skip, not the deal.
+    state.direction = 1;
     const first = uno.currentPlayer(state);
     withTopCard(state, { id: 'top', color: 'blue', value: '3' });
     first.hand = [{ id: 's', color: 'blue', value: 'skip' }, { id: 'x', color: 'red', value: '1' }];
@@ -285,4 +288,41 @@ test('uno-play: the slash command schema builds with its mode choices', () => {
     const rules = json.options.find(o => o.name === 'rules');
     assert.ok(rules, 'a rules option exists');
     assert.deepEqual(rules.choices.map(c => c.value), ['normal', 'stack', 'spicy']);
+});
+
+test('uno-play: an empty hand sends text, never an empty select menu', () => {
+    const command = require('../commands/uno-play');
+    const engine = uno.createGame({ players: PLAYERS });
+    const player = uno.currentPlayer(engine);
+    // The live crash: a player with no cards opened "My Hand", producing a
+    // select menu with zero options, which Discord rejects with 50035.
+    player.hand = [];
+    const empty = command.buildHandPayload({ id: 'g1', engine }, player);
+    assert.equal(empty.components.length, 0);
+    assert.match(empty.content, /empty/);
+
+    player.hand = engine.deck.splice(0, 3);
+    const full = command.buildHandPayload({ id: 'g1', engine }, player);
+    // Assert on the serialized payload: that is exactly what Discord validates.
+    const optionCount = full.components[0].components[0].toJSON().options.length;
+    assert.ok(optionCount >= 1 && optionCount <= 25);
+});
+
+test('uno-play: the table posts content plus a full-size image, not an embed', async () => {
+    const command = require('../commands/uno-play');
+    const engine = uno.createGame({ players: PLAYERS });
+    const payload = await command.gamePayload({ id: 'g1', engine, turnDeadline: Date.now() + 60_000 }, '');
+    assert.equal(payload.embeds, undefined, 'no embed: embeds shrink the table image');
+    assert.equal(payload.files.length, 1);
+    assert.equal(payload.files[0].name, 'uno-table.png');
+    assert.match(payload.content, /UNO · Round/);
+    assert.match(payload.content, /Top card/);
+    assert.ok(payload.content.length <= 2000, 'fits the message content limit');
+    assert.ok(payload.components.length >= 1, 'table buttons still attached');
+});
+
+test('uno-play: turn clock is 60s with a 5s grace period', () => {
+    const command = require('../commands/uno-play');
+    assert.equal(command.TURN_MS, 60_000);
+    assert.equal(command.GRACE_MS, 5_000);
 });
