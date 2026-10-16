@@ -228,7 +228,7 @@ async function turnTimedOut(game, token) {
     // The 60s are up, but the player gets 5 seconds of grace. Any card they
     // play in that window reschedules the turn and kills this timer.
     game.timer = setTimeout(() => graceExpired(game, token), GRACE_MS);
-    return updatePublic(game, `⏰ **${player.name}** is out of time — 5 seconds of grace to play a card!`);
+    return updatePublic(game, `⏰ **${player.name}** has not played a card.`);
 }
 
 async function graceExpired(game, token) {
