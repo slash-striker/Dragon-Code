@@ -13,9 +13,9 @@ const COMMAND_CATEGORIES = {
             { name: '/crime', desc: 'Solo breaches or escalating co-op heists with crew roles (hacker/driver/muscle)' },
             { name: '/rob', desc: 'Rob a player\'s wallet or start a bank heist (pick type)' },
             { name: '/daily', desc: 'Claim your daily cosmic reward' },
-            { name: '/fish', desc: 'Cast to fish, sell, shop, view your log — or check the live tournament board' },
+            { name: '/fish', desc: 'Opens a Fish Hub (Cast, sell, shop, view log, view tournament board)' },
             { name: '/bank', desc: 'Deposit, withdraw (pick action), or check your vault' },
-            { name: '/balance', desc: 'Check your wallet and bank balance' },
+            { name: '/balance', desc: 'Check your[someone else\'s] wallet and bank balance' },
             { name: '/transfer', desc: 'Send coins to another user' },
             { name: '/trade', desc: 'Trade items and credits with another player — both sides must confirm' },
             { name: '/bounty', desc: 'Put a price on someone\'s head; whoever robs them collects the pool' },
@@ -37,12 +37,13 @@ const COMMAND_CATEGORIES = {
         name: '🎰 CASINO ZONE',
         color: 0xff6b9d,
         commands: [
-            { name: '/blackjack', desc: 'Play blackjack against the dealer' },
+            { name: '/blackjack', desc: 'Play blackjack against the dealer: Only in Blackjack Thread in Party Games channel' },
             { name: '/games', desc: 'Every minigame in one slot — pick 5dice, hangman, highlow, lightsout, mastermind, matchpairs, rps, or tictactoe' },
+            { name: '/uno-play', desc: 'Open an UNO table — wilds, +2/+4, Normal/Stack/Spicy rules (UNO channel only)' },
             { name: '/scratchcard', desc: 'Buy and scratch cards for prizes' },
             { name: '/casino', desc: 'Casino rules + your summary (pick action)' },
             { name: '/roulette', desc: 'One-shot American roulette — /roulette amount:<#> bet_type:<color/area> or number:<0-36>' },
-            { name: '/guess-number', desc: 'Free to play — exact hit wins 🪙500,000' },
+            { name: '/guess-number', desc: '[ADMIN] Free to play — exact hit wins 🪙500,000' },
             { name: '/game-night', desc: 'Overview of every game-night module' },
             { name: '/activities', desc: 'QOTD + party games: bomb, math, mafia, spy (pick an activity)' },
         ]
@@ -69,7 +70,10 @@ const COMMAND_CATEGORIES = {
             { name: '/ec-stats', desc: 'Economy, blackjack and casino statistics in one' },
             { name: '/credits-audit', desc: 'View recent coin transactions' },
             { name: '/ec-cooldowns', desc: 'Open the live cooldown dashboard with refresh controls' },
-            { name: '/set-cooldown', desc: 'Configure economy cooldown durations (admin)' }
+            { name: '/set-cooldown', desc: 'Configure economy cooldown durations (admin)' },
+            { name: '/set-sleep', desc: 'Set your timezone and sleep schedule' },
+            { name: '/see-users-time', desc: 'View another user schedule' },
+            { name: '/time-at', desc: 'Convert time between user timezones' },
         ]
     },
     social: {
@@ -80,28 +84,24 @@ const COMMAND_CATEGORIES = {
             { name: '/market', desc: 'View and trade on the market' },
             { name: '/invest', desc: 'Contrarian market rounds: bet long or short, minority side wins bigger' },
             { name: '/exchange', desc: 'Exchange currencies' },
-            { name: '/locations', desc: 'View available locations' },
-            { name: '/birthday', desc: 'Check a registered birthday or set your own (pick action)' }
+            { name: '/birthday', desc: 'Check a registered birthday or set your own (pick action)' },
         ]
     },
     admin: {
         name: '🔧 ADMIN CONTROLS',
         color: 0xff4444,
         commands: [
-            { name: '/credits-give', desc: 'Give coins to a user' },
-            { name: '/giveaway', desc: 'Launch an admin-only interactive credit giveaway (staff can reroll the winner)' },
+            { name: '/credits-give', desc: '[ADMIN ONLY] Give coins to a user' },
+            { name: '/giveaway', desc: '[ADMIN ONLY] Launch an admin-only interactive credit giveaway (staff can reroll the winner)' },
             { name: '/dragon-admin', desc: '[ADMIN ONLY] One action-picker command for dragons, economy systems, admin roles, and server configuration' },
-            { name: '/admin item-give', desc: 'Admin grant an item; action is logged' },
-            { name: '/edit', desc: 'Edit a user\'s economy, inventory, daily streak, or XP (pick action)' },
-            { name: '/reset', desc: 'Reset a user\'s economy, stats, wallet, inventory, or XP (confirmation required; everyone flag for wallet/inventory/xp)' },
-            { name: '/set', desc: 'Record a player\'s highscore (staff)' },
+            { name: '/admin item-give', desc: '[ADMIN ONLY] Admin grant an item; action is logged' },
+            { name: '/edit', desc: '[ADMIN ONLY] Edit a user\'s economy, inventory, daily streak, or XP (pick action)' },
+            { name: '/reset', desc: '[ADMIN ONLY] Reset a user\'s economy, stats, wallet, inventory, or XP (confirmation required; everyone flag for wallet/inventory/xp)' },
+            { name: '/set', desc: '[ADMIN ONLY] Record a player\'s highscore (staff)' },
             { name: '/hs-admin', desc: '[ADMIN ONLY] Record or sync the Netquel highscores (pick action)' },
-            { name: '/jailed', desc: 'Manage jailed users' },
-            { name: '/admin', desc: 'Manage mining and economy state' },
-            { name: '/set-sleep', desc: 'Set your timezone and sleep schedule' },
-            { name: '/see-users-time', desc: 'View another user schedule' },
-            { name: '/time-at', desc: 'Convert time between user timezones' },
-            { name: '/staff-information', desc: '[ADMIN ONLY] View staff reporting guidance' },
+            { name: '/jailed', desc: '[ADMIN ONLY] Jails users' },
+            { name: '/admin', desc: '[ADMIN ONLY] Manage mining and economy state' },
+            { name: '/staff-information', desc: '[ADMIN ONLY] Staff Embed' },
             { name: '/ping', desc: 'Check bot and API latency' }
         ]
     },
@@ -111,7 +111,8 @@ const COMMAND_CATEGORIES = {
         commands: [
             { name: '/ui-style', desc: 'Toggle between high-tech and normal UI style' },
             { name: '/server-rules', desc: '[ADMIN ONLY] View server rules' },
-            { name: '/game-pings', desc: 'Ping the Game Ping role for game night (once per 30 min)' },
+            { name: '/game-pings', desc: 'Ping the Game Ping role with a game invite (once per 30 min)' },
+            { name: '/staff', desc: 'Ping a staff member' },
             { name: '/verify', desc: '[STAFF ONLY] Post the verification terminal for new members' }
         ]
     },
@@ -119,9 +120,9 @@ const COMMAND_CATEGORIES = {
         name: '🔢 COUNTING GRID',
         color: 0x00ff88,
         commands: [
-            { name: '/nextcount', desc: 'Privately check the next required number' },
+            { name: '/nextcount', desc: 'Check the next required number' },
             { name: '/count-leaderboard', desc: 'View the counting channel leaderboard' },
-            { name: '/set-count', desc: 'Admin-only counting grid reset' }
+            { name: '/set-count', desc: '[ADMIN ONLY] counting grid reset' }
         ]
     }
 };

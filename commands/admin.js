@@ -1,12 +1,16 @@
 const {
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
     PermissionFlagsBits,
-    SlashCommandBuilder
+    SlashCommandBuilder,
+    StringSelectMenuBuilder
 } = require('discord.js');
 const db = require('../database');
 const { getUser, updateUser } = require('../systems/economy/userManager');
 const { addOre } = require('../systems/mining/inventoryManager');
 const { getOrePool } = require('../systems/mining/oreTables');
-const { getItemByName, getItemQuantity } = require('../systems/economy/shopItems');
+const { SHOP_ITEMS, getItemQuantity } = require('../systems/economy/shopItems');
 const { addItem } = require('../systems/economy/inventoryh');
 const { confirmAction } = require('../systems/admin/confirmAction');
 const { isAdminUser, hideFromMembers } = require('../systems/admin/adminVisibility');
@@ -16,6 +20,75 @@ const { locations: miningLocations } = require('../systems/mining/drillTables');
 
 function isAdministrator(interaction) {
     return isAdminUser(interaction);
+}
+
+// /admin item-give: the admin picks the item from a select menu (paginated, 25 per page).
+const ITEM_PICKER_PREFIX = 'admin-item';
+const ITEM_PAGE_SIZE = 25;
+
+function buildItemPicker(adminId, targetId, quantity, page = 0) {
+    const items = Object.values(SHOP_ITEMS);
+    const pages = Math.max(1, Math.ceil(items.length / ITEM_PAGE_SIZE));
+    const current = Math.max(0, Math.min(Number(page) || 0, pages - 1));
+    const slice = items.slice(current * ITEM_PAGE_SIZE, (current + 1) * ITEM_PAGE_SIZE);
+    const base = `${ITEM_PICKER_PREFIX}:${adminId}:${targetId}:${quantity}`;
+    const menu = new StringSelectMenuBuilder()
+        .setCustomId(`${base}:pick:${current}`)
+        .setPlaceholder(`Choose an item (${current + 1}/${pages})`)
+        .addOptions(slice.map(item => ({
+            label: item.name.slice(0, 100),
+            description: `ID ${item.id} · limit ${item.limit}`.slice(0, 100),
+            value: item.id
+        })));
+    const rows = [new ActionRowBuilder().addComponents(menu)];
+    if (pages > 1) {
+        rows.push(new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`${base}:page:${current - 1}`).setLabel('Previous').setStyle(ButtonStyle.Secondary).setDisabled(current === 0),
+            new ButtonBuilder().setCustomId(`${base}:page:${current + 1}`).setLabel('Next').setStyle(ButtonStyle.Secondary).setDisabled(current >= pages - 1)
+        ));
+    }
+    return rows;
+}
+
+async function handleItemPickerComponent(interaction) {
+    const [, adminId, targetId, quantityText, verb, pageText] = interaction.customId.split(':');
+    if (interaction.user.id !== adminId) {
+        return interaction.reply({ content: 'This item picker belongs to another administrator.', ephemeral: true }).catch(() => {});
+    }
+    if (!isAdministrator(interaction)) {
+        return interaction.reply({ content: '❌ This command is restricted to administrators and configured staff roles.', ephemeral: true }).catch(() => {});
+    }
+    const quantity = Number(quantityText);
+    if (!Number.isInteger(quantity) || quantity < 1) {
+        return interaction.update({ content: '❌ Invalid quantity.', embeds: [], components: [] }).catch(() => {});
+    }
+    const target = await interaction.client.users.fetch(targetId).catch(() => null);
+    if (!target) {
+        return interaction.update({ content: '❌ The recipient could not be loaded.', embeds: [], components: [] }).catch(() => {});
+    }
+
+    if (verb === 'page') {
+        return interaction.update({
+            content: `Choose an item to give ${quantity}× to ${target.tag}.`,
+            components: buildItemPicker(adminId, targetId, quantity, Number(pageText) || 0)
+        });
+    }
+
+    const item = Object.values(SHOP_ITEMS).find(entry => entry.id === interaction.values?.[0]);
+    if (verb !== 'pick' || !item) {
+        return interaction.update({ content: '❌ That item is not available.', embeds: [], components: [] }).catch(() => {});
+    }
+    const current = getItemQuantity(target.id, item.id, db);
+    if (current + quantity > item.limit) {
+        return interaction.update({ content: `❌ Quantity exceeds ${item.name}'s limit (${item.limit}).`, embeds: [], components: [] });
+    }
+    addItem(target.id, item.id, quantity);
+    interaction.adminCommandDetails = `Target: ${target.tag} (${target.id})\nItem: ${item.name} (${item.id})\nQuantity: ${quantity}`;
+    return interaction.update({
+        content: `✅ Admin granted ${quantity}x ${item.name} to ${target.tag}.`,
+        embeds: [],
+        components: []
+    });
 }
 
 function findOre(oreId) {
@@ -77,7 +150,6 @@ module.exports = {
                 .setName('item-give')
                 .setDescription('Give an item to a user and log the grant')
                 .addUserOption(option => option.setName('user').setDescription('Recipient').setRequired(true))
-                .addStringOption(option => option.setName('item').setDescription('Item name or ID').setRequired(true))
                 .addIntegerOption(option => option.setName('quantity').setDescription('Quantity').setMinValue(1).setRequired(true))),
 
     async execute(interaction) {
@@ -99,15 +171,12 @@ module.exports = {
         }
 
         if (subcommand === 'item-give') {
-            const itemInput = interaction.options.getString('item');
             const quantity = interaction.options.getInteger('quantity');
-            const item = getItemByName(itemInput);
-            if (!item) return interaction.reply({ content: `❌ Unknown item: ${itemInput}` });
-            const current = getItemQuantity(target.id, item.id, db);
-            if (current + quantity > item.limit) return interaction.reply({ content: `❌ Quantity exceeds ${item.name}'s limit (${item.limit}).` });
-            addItem(target.id, item.id, quantity);
-            interaction.adminCommandDetails = `Target: ${target.tag} (${target.id})\nItem: ${item.name} (${item.id})\nQuantity: ${quantity}`;
-            return interaction.reply({ content: `✅ Admin granted ${quantity}x ${item.name} to ${target.tag}.` });
+            return interaction.reply({
+                content: `Choose an item to give ${quantity}× to ${target.tag}.`,
+                components: buildItemPicker(interaction.user.id, target.id, quantity, 0),
+                ephemeral: true
+            });
         }
 
         if (subcommand === 'mining-grant') {
@@ -150,3 +219,5 @@ module.exports = {
             content: `✅ Set ${target.tag}'s ${account} to ${amount.toLocaleString()} credits.` });
     }
 };
+
+module.exports.handleComponent = handleItemPickerComponent;

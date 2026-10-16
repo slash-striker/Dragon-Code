@@ -67,6 +67,14 @@ function setAllowedChannels(ids) {
     return getAllowedChannels();
 }
 
+/* Claim-notice columns were added after credit_capsules first shipped. */
+function ensureClaimNoticeColumns() {
+    const columns = new Set(db.prepare('PRAGMA table_info(credit_capsules)').all().map(column => column.name));
+    if (!columns.has('claimNoticeIds')) db.exec('ALTER TABLE credit_capsules ADD COLUMN claimNoticeIds TEXT');
+    if (!columns.has('claimDeleteAt')) db.exec('ALTER TABLE credit_capsules ADD COLUMN claimDeleteAt INTEGER');
+}
+ensureClaimNoticeColumns();
+
 function minCapsuleValue() {
     const value = Number(metaGet(META_MIN));
     return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_MIN;
@@ -81,7 +89,8 @@ function maxCapsuleValue() {
 function rollAmount() {
     const min = minCapsuleValue();
     const max = maxCapsuleValue();
-    const raw = min + Math.floor(Math.random() * (max - min));
+    // Skew toward the floor: raising the roll to 2.5 makes small capsules far more common.
+    const raw = min + Math.floor(Math.pow(Math.random(), 2.5) * (max - min));
     return Math.max(min, Math.round(raw / 500) * 500);
 }
 
@@ -245,7 +254,46 @@ function claimCapsule(capsuleId, userId, now = Date.now()) {
     }
 }
 
+/* Claim notices ("captured" + "already claimed") are removed 15 minutes after the claim. */
+function recordClaimNotices(capsuleId, messageIds, deleteAt) {
+    db.prepare('UPDATE credit_capsules SET claimNoticeIds = ?, claimDeleteAt = ? WHERE capsuleId = ?')
+        .run(JSON.stringify(messageIds.filter(Boolean)), deleteAt, capsuleId);
+}
+
+async function expireClaimNotices(client, now = Date.now()) {
+    const due = db.prepare(`
+        SELECT capsuleId, channelId, claimNoticeIds FROM credit_capsules
+        WHERE claimDeleteAt IS NOT NULL AND claimDeleteAt <= ?
+    `).all(now);
+    for (const row of due) {
+        const ids = JSON.parse(row.claimNoticeIds || '[]');
+        let channel = null;
+        try {
+            channel = await client?.channels?.fetch(row.channelId);
+        } catch (error) {
+            console.warn(`Could not reach capsule channel for claim notices #${row.capsuleId}:`, error.message);
+            continue;
+        }
+        let failed = false;
+        for (const messageId of ids) {
+            try {
+                const message = await channel?.messages?.fetch(messageId);
+                if (message) await message.delete();
+            } catch (error) {
+                // Already gone is fine; anything else is retried on the next tick.
+                if (!(error?.code === 10008 || error?.status === 404)) failed = true;
+            }
+        }
+        if (!failed) {
+            db.prepare('UPDATE credit_capsules SET claimNoticeIds = NULL, claimDeleteAt = NULL WHERE capsuleId = ?')
+                .run(row.capsuleId);
+        }
+    }
+    return due.length;
+}
+
 async function expireCapsules(client, now = Date.now()) {
+    await expireClaimNotices(client, now);
     db.prepare("UPDATE credit_capsules SET status = 'expired' WHERE status = 'live' AND endsAt <= ?").run(now);
     const expired = db.prepare(`
         SELECT capsuleId, channelId, messageId, status
@@ -300,7 +348,10 @@ module.exports = {
     isCapsuleDue,
     spawnCapsule,
     claimCapsule,
+    recordClaimNotices,
+    expireClaimNotices,
     expireCapsules,
+    CLAIM_NOTICE_TTL_MS: 15 * 60 * 1000,
     getActiveCapsules,
     buildCapsuleCard
 };

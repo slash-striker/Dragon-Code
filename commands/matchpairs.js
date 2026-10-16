@@ -17,7 +17,10 @@ const {
 
 const GAME_KEY = 'matchpairs';
 const COLLECTOR_TIME = 5 * 60 * 1000;
-const MISS_PENALTY_MS = 900;
+const MISS_PENALTY_MS = 1000;
+// Every wrong pair costs a life; running out ends the grid.
+const STARTING_LIVES = 12;
+const WIN_REWARD = 500;
 
 // 5×4 board = 20 cells. Discord caps a message at 5 ActionRows, so the board
 // is split across two cohesive messages: the top half on the first message,
@@ -46,9 +49,9 @@ function createDeck() {
     return shuffle(SYMBOLS.flatMap(symbol => [symbol, symbol]));
 }
 
-function rewardForMoves(moves) {
-    // Perfect memory (10 moves) tops out at 900; every wasted pair erodes it.
-    return Math.max(200, 900 - (moves - PAIRS) * 40);
+// Clearing the grid pays a flat reward regardless of how many moves it took.
+function rewardForWin() {
+    return WIN_REWARD;
 }
 
 function recordStats(userId, won, reward) {
@@ -102,12 +105,10 @@ function boardLines(state, fromRow, toRow) {
 
 function hudLines(state, extra = '') {
     const pairsFound = state.found.length / 2;
-    const movesLeft = Math.max(0, state.moveLimit - state.moves);
     return panel(
         `${ANSI.MAGENTA}◈ SECTOR SCAN${ANSI.RESET}`,
         kv('Pairs', `${pairsFound}/${PAIRS}`),
-        kv('Moves', `${state.moves}/${state.moveLimit}`),
-        kv('Buffer', `${movesLeft} moves left`),
+        kv('Lives', `${state.lives}/${STARTING_LIVES}`),
         '',
         `${ANSI.DIM}${'▰'.repeat(pairsFound)}${'▱'.repeat(PAIRS - pairsFound)} signal pairs${ANSI.RESET}`,
         // Win/loss/timeout banners go INSIDE the ```ansi``` panel — raw ANSI
@@ -140,7 +141,7 @@ function bottomEmbed(state, extra = '') {
 
 function controlRow(state) {
     return new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`mp:${state.id}:resign`).setLabel('✖ ABORT').setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId(`mp:${state.id}:resign`).setLabel('🚪 Quit').setStyle(ButtonStyle.Danger)
     );
 }
 
@@ -163,7 +164,7 @@ async function finish(messages, state, won) {
     if (state.ended) return;
     state.ended = true;
     state.won = won;
-    const reward = won ? rewardForMoves(state.moves) : 0;
+    const reward = won ? rewardForWin() : 0;
     recordStats(state.userId, won, reward);
     if (reward > 0) {
         casino.creditWallet(state.userId, GAME_KEY, reward, 'payout', 'Match Pairs win');
@@ -173,7 +174,7 @@ async function finish(messages, state, won) {
 
     const result = won
         ? `${ANSI.GREEN}${ANSI.BOLD}≫ GRID CLEARED — PAYOUT 🪙${reward.toLocaleString()} <<${ANSI.RESET}`
-        : `${ANSI.RED}≫ MOVE BUFFER EXHAUSTED — SIGNAL LOST${ANSI.RESET}`;
+        : `${ANSI.RED}≫ OUT OF LIVES — SIGNAL LOST${ANSI.RESET}`;
     await refresh(messages, state, result);
     state.collectors.forEach(collector => collector.stop('finished'));
 }
@@ -205,10 +206,6 @@ async function handleCell(messages, state, index, interaction) {
             await refresh(messages, state);
             return finish(messages, state, true);
         }
-        if (state.moves >= state.moveLimit) {
-            await refresh(messages, state);
-            return finish(messages, state, false);
-        }
         return refresh(messages, state);
     }
 
@@ -218,7 +215,8 @@ async function handleCell(messages, state, index, interaction) {
 
     state.open = [];
     state.locked = false;
-    if (state.moves >= state.moveLimit) {
+    state.lives--;
+    if (state.lives <= 0) {
         await refresh(messages, state);
         return finish(messages, state, false);
     }
@@ -287,8 +285,7 @@ async function startGame(interaction) {
         open: [],
         found: [],
         moves: 0,
-        // 20 cells need at least 10 moves; 24 gives a little slack.
-        moveLimit: 24,
+        lives: STARTING_LIVES,
         locked: false,
         ended: false,
         won: false,
@@ -312,7 +309,7 @@ async function startGame(interaction) {
 
 module.exports = {
     createDeck,
-    rewardForMoves,
+    rewardForWin,
     PAIRS,
     data: new SlashCommandBuilder()
         .setName('matchpairs')

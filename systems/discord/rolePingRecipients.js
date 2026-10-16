@@ -1,4 +1,4 @@
-async function buildRoleRecipientPings(guild, roleIds, excludedUserId, limit = 70) {
+async function buildRoleRecipientPings(guild, roleIds, excludedUserId, limit = 70, isAsleep = null) {
     if (guild?.members?.fetch) {
         try {
             await guild.members.fetch();
@@ -17,7 +17,10 @@ async function buildRoleRecipientPings(guild, roleIds, excludedUserId, limit = 7
     for (const roleId of roleIds || []) {
         const role = guild?.roles?.cache?.get(String(roleId));
         for (const [userId] of role?.members || []) {
-            if (userId !== excludedUserId) recipientIds.add(userId);
+            if (userId === excludedUserId) continue;
+            // Members inside their own sleep window are never pinged.
+            if (isAsleep && isAsleep(userId)) continue;
+            recipientIds.add(userId);
         }
     }
 
