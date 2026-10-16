@@ -106,7 +106,10 @@ async function gamePayload(game, note = '') {
             : engine.rulesMode === 'spicy'
                 ? `⚠️ **+${engine.pendingDraw}** pending — stack any +2/+4 or draw.`
                 : `⚠️ **+${engine.pendingDraw}** pending — stack a matching +2/+4 or draw.`) : '',
-        note ? `\n${note}` : '',
+        note && !game.actionHistory?.includes(note) ? `\n${note}` : '',
+        game.actionHistory?.length
+            ? `\n**Recent plays**\n${game.actionHistory.slice(-4).map(action => `• ${action}`).join('\n')}`
+            : '',
         '',
         standingsLines(engine),
         '',
@@ -184,12 +187,15 @@ function scheduleTurn(game) {
 
 async function afterAction(game, note) {
     const engine = game.engine;
+    game.actionHistory ??= [];
+    game.actionHistory.push(note);
+    game.actionHistory = game.actionHistory.slice(-4);
     if (engine.status === 'ended') return finishGame(game, note);
     if (engine.status === 'round-over') {
         clearTimer(game);
         game.turnToken++;
         const winner = engine.players.find(p => p.id === engine.roundWinnerId);
-        await updatePublic(game, `${note}\n🏁 **${winner?.name ?? 'Someone'}** went out and scored **${engine.roundPoints}**.`);
+        await updatePublic(game, `🏁 **${winner?.name ?? 'Someone'}** went out and scored **${engine.roundPoints}**.`);
         game.timer = setTimeout(() => {
             if (game.ended) return;
             uno.startNextRound(engine);
@@ -449,6 +455,7 @@ module.exports = {
             engine: null,
             status: 'lobby',
             message: null,
+            actionHistory: [],
             timer: null,
             turnToken: 0,
             ended: false

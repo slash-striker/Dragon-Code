@@ -22,14 +22,12 @@ const MISS_PENALTY_MS = 1000;
 const STARTING_LIVES = 12;
 const WIN_REWARD = 500;
 
-// 5×4 board = 20 cells. Discord caps a message at 5 ActionRows, so the board
-// is split across two cohesive messages: the top half on the first message,
-// the bottom half + HUD/controls on the follow-up.
+// A 4-row × 5-column board fits in one Discord message, leaving the fifth
+// ActionRow for controls.
 const COLS = 5;
 const ROWS = 4;
 const CELLS = COLS * ROWS;
 const PAIRS = CELLS / 2;
-const SPLIT_ROW = 2; // rows 0-1 on message one, rows 2-3 on message two
 
 const SYMBOLS = ['🐉', '🌙', '💎', '🔥', '⚡', '❄️', '🌟', '🍀', '🔮', '🧿'];
 
@@ -76,10 +74,10 @@ function cellButton(state, index) {
         .setDisabled(matched || state.ended);
 }
 
-// Rows of buttons for cells [fromRow * COLS, toRow * COLS).
-function boardRows(state, fromRow, toRow) {
+// Four rows of five buttons: the complete board stays together in one message.
+function boardRows(state) {
     const rows = [];
-    for (let row = fromRow; row < toRow; row++) {
+    for (let row = 0; row < ROWS; row++) {
         rows.push(new ActionRowBuilder().addComponents(
             ...Array.from({ length: COLS }, (_, col) => cellButton(state, row * COLS + col))
         ));
@@ -87,10 +85,10 @@ function boardRows(state, fromRow, toRow) {
     return rows;
 }
 
-// One line per board row so each message's description mirrors its buttons.
-function boardLines(state, fromRow, toRow) {
+// One line per board row so the embed mirrors the four button rows.
+function boardLines(state) {
     const lines = [];
-    for (let row = fromRow; row < toRow; row++) {
+    for (let row = 0; row < ROWS; row++) {
         const cells = [];
         for (let col = 0; col < COLS; col++) {
             const index = row * COLS + col;
@@ -117,24 +115,11 @@ function hudLines(state, extra = '') {
     );
 }
 
-function topEmbed(state) {
+function gameEmbed(state, extra = '') {
     return new EmbedBuilder()
         .setColor(state.ended ? (state.won ? NEON.green : NEON.red) : NEON.cyan)
-        .setTitle(`◢ ═══ 🧩 MATCH PAIRS // GRID A ═══ ◣`)
-        .setDescription(
-            `${boardLines(state, 0, SPLIT_ROW).join('\n')}\n${hudLines(state)}`
-        )
-        .setFooter({ text: `NODE ${state.id.slice(-6).toUpperCase()} • MEMORY PROTOCOL` })
-        .setTimestamp();
-}
-
-function bottomEmbed(state, extra = '') {
-    return new EmbedBuilder()
-        .setColor(state.ended ? (state.won ? NEON.green : NEON.red) : NEON.cyan)
-        .setTitle(`◢ ═══ 🧩 MATCH PAIRS // GRID B ═══ ◣`)
-        .setDescription(
-            `${boardLines(state, SPLIT_ROW, ROWS).join('\n')}\n${hudLines(state, extra)}`
-        )
+        .setTitle('◢ ═══ 🧩 MATCH PAIRS // 4×5 GRID ═══ ◣')
+        .setDescription(`${boardLines(state).join('\n')}\n${hudLines(state, extra)}`)
         .setFooter({ text: `NODE ${state.id.slice(-6).toUpperCase()} • MEMORY PROTOCOL` })
         .setTimestamp();
 }
@@ -151,16 +136,14 @@ function againRow(state) {
     );
 }
 
-async function refresh(messages, state, extra = '') {
-    const [top, bottom] = messages;
-    await top.edit({ embeds: [topEmbed(state)], components: state.ended ? [] : boardRows(state, 0, SPLIT_ROW) });
-    await bottom.edit({
-        embeds: [bottomEmbed(state, extra)],
-        components: state.ended ? [againRow(state)] : [...boardRows(state, SPLIT_ROW, ROWS), controlRow(state)]
+async function refresh(message, state, extra = '') {
+    await message.edit({
+        embeds: [gameEmbed(state, extra)],
+        components: state.ended ? [againRow(state)] : [...boardRows(state), controlRow(state)]
     });
 }
 
-async function finish(messages, state, won) {
+async function finish(message, state, won) {
     if (state.ended) return;
     state.ended = true;
     state.won = won;
@@ -175,11 +158,11 @@ async function finish(messages, state, won) {
     const result = won
         ? `${ANSI.GREEN}${ANSI.BOLD}≫ GRID CLEARED — PAYOUT 🪙${reward.toLocaleString()} <<${ANSI.RESET}`
         : `${ANSI.RED}≫ OUT OF LIVES — SIGNAL LOST${ANSI.RESET}`;
-    await refresh(messages, state, result);
+    await refresh(message, state, result);
     state.collectors.forEach(collector => collector.stop('finished'));
 }
 
-async function handleCell(messages, state, index, interaction) {
+async function handleCell(message, state, index, interaction) {
     // Acknowledge immediately — edits below go through message.edit.
     await interaction.deferUpdate();
     if (state.ended || state.locked) return;
@@ -188,7 +171,7 @@ async function handleCell(messages, state, index, interaction) {
     state.open.push(index);
 
     if (state.open.length < 2) {
-        return refresh(messages, state);
+        return refresh(message, state);
     }
 
     // Second card: lock the board while the pair resolves.
@@ -203,67 +186,64 @@ async function handleCell(messages, state, index, interaction) {
         state.locked = false;
 
         if (state.found.length === CELLS) {
-            await refresh(messages, state);
-            return finish(messages, state, true);
+            await refresh(message, state);
+            return finish(message, state, true);
         }
-        return refresh(messages, state);
+        return refresh(message, state);
     }
 
     // Miss: show both cards briefly, then flip them back.
-    await refresh(messages, state);
+    await refresh(message, state);
     await new Promise(resolve => setTimeout(resolve, MISS_PENALTY_MS));
 
     state.open = [];
     state.locked = false;
     state.lives--;
     if (state.lives <= 0) {
-        await refresh(messages, state);
-        return finish(messages, state, false);
+        await refresh(message, state);
+        return finish(message, state, false);
     }
-    return refresh(messages, state);
+    return refresh(message, state);
 }
 
-function setupCollectors(top, bottom, state, userId) {
-    state.collectors = [];
-    for (const message of [top, bottom]) {
-        const collector = message.createMessageComponentCollector({
-            componentType: ComponentType.Button, time: COLLECTOR_TIME
-        });
-        state.collectors.push(collector);
-        collector.on('collect', async interaction => {
-            if (interaction.user.id !== userId) {
-                return interaction.reply({ content: 'This is not your grid.' });
+function setupCollector(message, state, userId) {
+    const collector = message.createMessageComponentCollector({
+        componentType: ComponentType.Button, time: COLLECTOR_TIME
+    });
+    state.collectors = [collector];
+    collector.on('collect', async interaction => {
+        if (interaction.user.id !== userId) {
+            return interaction.reply({ content: 'This is not your grid.' });
+        }
+        const parts = interaction.customId.split(':');
+        const action = parts[2];
+        if (action === 'again') {
+            if (state.ended) {
+                collector.stop('again');
+                return startGame(interaction);
             }
-            const parts = interaction.customId.split(':');
-            const action = parts[2];
-            if (action === 'again') {
-                if (state.ended) {
-                    state.collectors.forEach(c => c.stop('again'));
-                    return startGame(interaction);
-                }
-                return interaction.deferUpdate();
-            }
-            if (action === 'resign') {
-                if (state.ended) return interaction.deferUpdate();
-                await interaction.deferUpdate();
-                return finish([top, bottom], state, false);
-            }
-            const index = Number(action);
-            if (!Number.isInteger(index)) return interaction.deferUpdate();
-            await handleCell([top, bottom], state, index, interaction);
-        });
-        collector.on('end', async (_, reason) => {
-            if (reason !== 'time' || state.ended) return;
-            state.ended = true;
-            setCooldown(state.userId, GAME_KEY);
-            games.delete(state.id);
-            try {
-                await refresh([top, bottom], state, `${ANSI.RED}≫ LINK TIMED OUT — SIGNAL LOST${ANSI.RESET}`);
-            } catch (error) {
-                console.error('Match Pairs timeout render failed:', error);
-            }
-        });
-    }
+            return interaction.deferUpdate();
+        }
+        if (action === 'resign') {
+            if (state.ended) return interaction.deferUpdate();
+            await interaction.deferUpdate();
+            return finish(message, state, false);
+        }
+        const index = Number(action);
+        if (!Number.isInteger(index)) return interaction.deferUpdate();
+        await handleCell(message, state, index, interaction);
+    });
+    collector.on('end', async (_, reason) => {
+        if (reason !== 'time' || state.ended) return;
+        state.ended = true;
+        setCooldown(state.userId, GAME_KEY);
+        games.delete(state.id);
+        try {
+            await refresh(message, state, `${ANSI.RED}≫ LINK TIMED OUT — SIGNAL LOST${ANSI.RESET}`);
+        } catch (error) {
+            console.error('Match Pairs timeout render failed:', error);
+        }
+    });
 }
 
 async function startGame(interaction) {
@@ -294,16 +274,12 @@ async function startGame(interaction) {
     games.set(state.id, state);
 
     await interaction.reply({
-        embeds: [topEmbed(state)],
-        components: boardRows(state, 0, SPLIT_ROW)
+        embeds: [gameEmbed(state)],
+        components: [...boardRows(state), controlRow(state)]
     });
-    const top = await interaction.fetchReply();
-    const bottom = await interaction.followUp({
-        embeds: [bottomEmbed(state)],
-        components: [...boardRows(state, SPLIT_ROW, ROWS), controlRow(state)]
-    });
+    const message = await interaction.fetchReply();
 
-    setupCollectors(top, bottom, state, userId);
+    setupCollector(message, state, userId);
     setCooldown(userId, GAME_KEY);
 }
 
@@ -311,9 +287,12 @@ module.exports = {
     createDeck,
     rewardForWin,
     PAIRS,
+    COLS,
+    ROWS,
+    boardRows,
     data: new SlashCommandBuilder()
         .setName('matchpairs')
-        .setDescription('Match hidden signal pairs on a 5×4 grid')
+        .setDescription('Match hidden signal pairs on a 4-row × 5-column grid')
         .addStringOption(option => option.setName('mode').setDescription('What to do').addChoices(
             { name: 'Play', value: 'play' },
             { name: 'Stats', value: 'stats' }

@@ -710,8 +710,9 @@ client.on(Events.InteractionCreate, async interaction => {
         , 'nextcount', 'count-leaderboard'
         , 'roulette', 'guess-number', 'bomb', 'math', 'mafia', 'spy', 'activities', 'game-night'
         , 'games'
-        , 'birthday'
-        , 'mining-inventory'
+        ,        'birthday'
+        , 'mining-inventory', 'uno-play'
+
     ];
 
     let slowNotice = null;

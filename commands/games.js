@@ -17,7 +17,7 @@ const tttElo = require('../systems/economy/tttElo');
 /*
  * 🎮 /games — one slash slot for all eight minigames.
  *
- *   /games                → lounge embed with a BUTTON per game
+ *   /games                → lounge embed with a game select menu
  *   /games game:5dice …   → power path, straight into the engine with options
  *
  * Each lounge button opens that game's SETUP PANEL embed — its own buttons
@@ -262,43 +262,47 @@ function loungeEmbed(user) {
         .setColor(0x00d4ff)
         .setTitle('🎮 GAME LOUNGE')
         .setDescription(
-            '**Eight minigames, one command.** Hit a game\'s button below to open its setup panel — every difficulty, mode and bet lives on that panel\'s own buttons.\n\n' +
+            '**Pick a game from the menu below** to open its setup panel. Choose a difficulty, mode, or wager there, or open **Custom settings**.\n\n' +
             Object.values(GAME_DEFS).map(g => `${g.emoji} **${g.name}** — ${g.tagline}`).join('\n') +
-            '\n\n**⚡ Speedrun?** `/games game:Hangman difficulty:hard` (and every other option combo) still skips straight into the game.\n' +
-            '**🏆 Tic-Tac-Toe Ladder** — rated player-vs-player Elo with a weekly promotion for the top rating.\n' +
-            '**✋ No inputs? Totally fine.** Slash options are ALL optional — a bare `/games` is enough; the buttons do the rest.'
+            '\n\n🏆 **Tic-Tac-Toe Ladder** — rated player-vs-player matches with Elo ratings.\n' +
+            'Prefer slash options? `/games game:Hangman difficulty:hard` starts directly. A bare `/games` opens this menu.'
         )
-        .setFooter({ text: `${user.tag ?? user.username ?? 'Player'} • buttons stay live across restarts` })
+        .setFooter({ text: `${user.tag ?? user.username ?? 'Player'} • interactive game menu` })
         .setTimestamp();
 }
 
 function buildLoungeRows() {
-    const ids = Object.keys(GAME_DEFS);
-    const rows = [];
-    for (let i = 0; i < ids.length; i += 5) {
-        rows.push(new ActionRowBuilder().addComponents(ids.slice(i, i + 5).map(id =>
-            new ButtonBuilder()
-                .setCustomId(`games:open:${id}`)
-                .setLabel(GAME_DEFS[id].name)
-                .setEmoji(GAME_DEFS[id].emoji)
-                .setStyle(ButtonStyle.Primary))));
-    }
-    // The ranked ladder has no bot engine, so it is not in GAME_DEFS — the
-    // lounge gets one extra button for it instead.
+    const gameMenu = new StringSelectMenuBuilder()
+        .setCustomId('games:select')
+        .setPlaceholder('Choose a game to see its options…')
+        .addOptions(Object.entries(GAME_DEFS).map(([id, game]) => ({
+            label: game.name,
+            description: game.tagline.slice(0, 100),
+            value: id,
+            emoji: game.emoji
+        })));
     const ladderButton = new ButtonBuilder()
         .setCustomId('games:ladder')
         .setLabel('Tic-Tac-Toe Ladder')
         .setEmoji('🏆')
         .setStyle(ButtonStyle.Success);
-    const lastRow = rows[rows.length - 1];
-    if (lastRow && lastRow.components.length < 5) lastRow.addComponents(ladderButton);
-    else rows.push(new ActionRowBuilder().addComponents(ladderButton));
-    return rows;
+    return [
+        new ActionRowBuilder().addComponents(gameMenu),
+        new ActionRowBuilder().addComponents(ladderButton)
+    ];
+}
+
+function disabledRows(rows) {
+    return rows.map(row => new ActionRowBuilder().addComponents(row.components.map(component => {
+        const data = typeof component.toJSON === 'function' ? component.toJSON() : component;
+        return data.type === 3
+            ? StringSelectMenuBuilder.from(data).setDisabled(true)                : ButtonBuilder.from(data).setDisabled(true);
+
+    })));
 }
 
 function disabledLoungeRows() {
-    return buildLoungeRows().map(row =>
-        new ActionRowBuilder().addComponents(row.components.map(c => ButtonBuilder.from(c).setDisabled(true))));
+    return disabledRows(buildLoungeRows());
 }
 
 function gamePanelEmbed(game, user) {
@@ -425,7 +429,10 @@ async function runLounge(interaction) {
 
     collector.on('end', async () => {
         try {
-            await message.edit({ components: disabledLoungeRows() });
+            // A menu click can replace the lounge with a setup panel. Disable
+            // whichever controls are actually visible, rather than restoring a
+            // stale disabled lounge over the user's current view.
+            await message.edit({ components: disabledRows(message.components) });
         } catch (error) {
             if (error?.code !== 10008) console.error('Unable to close game lounge:', error);
         }
@@ -995,6 +1002,8 @@ module.exports = {
 
     GAME_CHOICES,
     GAME_DEFS,
+    buildLoungeRows,
+    disabledLoungeRows,
     facadeFor,
     startGame,
     effectiveDifficulty,
@@ -1058,15 +1067,16 @@ module.exports = {
         const rawId = String(interaction.customId || '');
         // Ranked Tic-Tac-Toe ladder (player vs player) — see handleLadderComponent.
         if (rawId.startsWith('ttt:')) return handleLadderComponent(interaction);
-        const [, verb, game, btnId] = rawId.split(':');
+        const [, verb, panelGame, btnId] = rawId.split(':');
         // The lounge's 🏆 button carries no game segment.
         if (verb === 'ladder') return handleLadderComponent(interaction);
-        if (!game || !GAME_DEFS[game]) return interaction.deferUpdate().catch(() => {});
+        const selectedGame = verb === 'select' ? interaction.values?.[0] : panelGame;
+        if (!selectedGame || !GAME_DEFS[selectedGame]) return interaction.deferUpdate().catch(() => {});
 
-        if (verb === 'open') {
+        if (verb === 'open' || verb === 'select') {
             return interaction.update({
-                embeds: [gamePanelEmbed(game, interaction.user)],
-                components: buildPanelRows(game)
+                embeds: [gamePanelEmbed(selectedGame, interaction.user)],
+                components: buildPanelRows(selectedGame)
             }).catch(() => {});
         }
         if (verb === 'back') {
@@ -1075,6 +1085,7 @@ module.exports = {
                 components: buildLoungeRows()
             }).catch(() => {});
         }
+        const game = selectedGame;
         if (verb === 'cfg') return showConfigModal(interaction, game);
         if (verb === 'go') {
             const btn = GAME_DEFS[game].buttons.flat().find(b => b.id === btnId);

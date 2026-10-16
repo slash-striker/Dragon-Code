@@ -317,6 +317,11 @@ test('uno-play: the table posts content plus a full-size image, not an embed', a
     assert.equal(payload.files[0].name, 'uno-table.png');
     assert.match(payload.content, /UNO · Round/);
     assert.match(payload.content, /Top card/);
+    const recent = await command.gamePayload({
+        id: 'g1', engine, turnDeadline: Date.now() + 60_000,
+        actionHistory: ['🤖 UNO Bot played **Red 5** and chose red.']
+    });
+    assert.match(recent.content, /Recent plays[\s\S]*UNO Bot played/);
     assert.ok(payload.content.length <= 2000, 'fits the message content limit');
     assert.ok(payload.components.length >= 1, 'table buttons still attached');
 });

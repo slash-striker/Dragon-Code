@@ -137,6 +137,38 @@ test('highscore registry stores, ranks, and syncs leaderboard state', () => {
     assert.match(emptyEmbed.data.title, /HIGHSCORES/);
 });
 
+test('matchpairs builds a 4-row by 5-column board in one message', () => {
+    const matchpairs = require('../commands/matchpairs');
+    const state = {
+        id: 'test-grid', values: Array.from({ length: 20 }, (_, index) => String(index)),
+        found: [], open: [], ended: false
+    };
+    const rows = matchpairs.boardRows(state);
+    assert.equal(matchpairs.ROWS, 4);
+    assert.equal(matchpairs.COLS, 5);
+    assert.equal(rows.length, 4, 'the board must use four ActionRows');
+    assert.deepEqual(rows.map(row => row.components.length), [5, 5, 5, 5]);
+});
+
+test('games lounge exposes a select menu with all games and the ladder button', () => {
+    const games = require('../commands/games');
+    const rows = games.buildLoungeRows();
+    assert.equal(rows.length, 2);
+    const menu = rows[0].components[0].toJSON();
+    assert.equal(menu.type, 3, 'game picker should be a string select menu');
+    assert.equal(menu.options.length, Object.keys(games.GAME_DEFS).length);
+    assert.equal(rows[1].components[0].data.custom_id, 'games:ladder');
+    assert.ok(games.disabledLoungeRows().every(row => row.components.every(component => component.data.disabled)));
+});
+
+test('dragon-admin action names make run operations explicit', () => {
+    const dragonAdmin = require('../commands/dragon-admin');
+    const actions = new Map(dragonAdmin.DRAGON_ADMIN_ACTIONS.map(action => [action.value, action.name]));
+    assert.equal(actions.get('run.tournament'), 'Start a fishing tournament');
+    assert.equal(actions.get('run.settle-tournament'), 'End tournament now and pay winners');
+    assert.equal(dragonAdmin.data.toJSON().name, 'dragon-admin');
+});
+
 test('hangman helpers compute display, rewards, and hints', () => {
     const { getDisplayWord, isWordGuessed, getRemainingLetters, getFinalReward, getRandomWord } = require('../commands/hangman');
 

@@ -101,61 +101,62 @@ function adaptActionInteraction(interaction, action) {
 }
 
 const DRAGON_ADMIN_ACTIONS = [
-    { name: 'Hatchery · grant egg', value: 'hatchery.grant-egg' },
-    { name: 'Hatchery · give dragon', value: 'hatchery.give-dragon' },
-    { name: 'Hatchery · hatch egg', value: 'hatchery.hatch' },
-    { name: 'Hatchery · set level', value: 'hatchery.set-level' },
-    { name: 'Hatchery · delete dragon', value: 'hatchery.delete' },
-    { name: 'Hatchery · list dragons', value: 'hatchery.list' },
-    { name: 'Run · tournament', value: 'run.tournament' },
-    { name: 'Run · settle tournament', value: 'run.settle-tournament' },
-    { name: 'Run · open market round', value: 'run.market-round' },
-    { name: 'Run · settle market', value: 'run.settle-market' },
-    { name: 'Run · flash deals', value: 'run.flash-deals' },
-    { name: 'Run · drop capsule', value: 'run.capsule' },
-    { name: 'Run · snapshot', value: 'run.snapshot' },
-    { name: 'Run · open race', value: 'run.race-open' },
-    { name: 'Run · settle race', value: 'run.race-settle' },
-    { name: 'Run · Elo promotion', value: 'run.elo-promotion' },
-    { name: 'Reward · badge', value: 'reward.badge' },
-    { name: 'Reward · title', value: 'reward.title' },
-    { name: 'Reward · streak shield', value: 'reward.streak-shield' },
-    { name: 'Reward · seasonal gift', value: 'reward.seasonal-gift' },
-    { name: 'View · status', value: 'view.status' },
-    { name: 'View · bounties', value: 'view.bounties' },
-    { name: 'View · clear bounty', value: 'view.clear-bounty' },
-    { name: 'View · reminders', value: 'view.reminders' },
-    { name: 'View · capsules', value: 'view.capsules' },
-    { name: 'View · trades', value: 'view.trades' },
-    { name: 'View · ladder', value: 'view.ladder' },
-    { name: 'View · races', value: 'view.races' },
-    { name: 'Config · capsule channels', value: 'config.capsule-channels' },
-    { name: 'Config · capsule range', value: 'config.capsule-range' },
-    { name: 'Config · snapshot channel', value: 'config.snapshot-channel' },
-    { name: 'Config · reset Elo', value: 'config.reset-elo' },
-    { name: 'Config · cancel trade', value: 'config.cancel-trade' },
-    { name: 'Config · admin roles', value: 'config.admin-roles' },
-    { name: 'Config · admin log', value: 'config.admin-log' },
-    { name: 'Config · server settings', value: 'config.server' },
-    { name: 'Config · list server settings', value: 'config.server-list' },
-    { name: 'Config · command channel', value: 'config.command-channel' },
-    { name: 'Config · list command channels', value: 'config.command-channels' }
+    { name: 'Give a player an egg', value: 'hatchery.grant-egg' },
+    { name: 'Give a player a dragon', value: 'hatchery.give-dragon' },
+    { name: 'Instantly hatch an egg', value: 'hatchery.hatch' },
+    { name: 'Change a dragon’s level', value: 'hatchery.set-level' },
+    { name: 'Permanently delete a dragon', value: 'hatchery.delete' },
+    { name: 'List a player’s eggs and dragons', value: 'hatchery.list' },
+    { name: 'Start a fishing tournament', value: 'run.tournament' },
+    { name: 'End tournament now and pay winners', value: 'run.settle-tournament' },
+    { name: 'Open an ore prediction round', value: 'run.market-round' },
+    { name: 'Close ore round and pay winners', value: 'run.settle-market' },
+    { name: 'Reroll today’s shop discounts', value: 'run.flash-deals' },
+    { name: 'Spawn a credit capsule', value: 'run.capsule' },
+    { name: 'Post the weekly server snapshot', value: 'run.snapshot' },
+    { name: 'Open this week’s dragon race', value: 'run.race-open' },
+    { name: 'Finish dragon race and pay bets', value: 'run.race-settle' },
+    { name: 'Promote top Tic-Tac-Toe players', value: 'run.elo-promotion' },
+    { name: 'Give or revoke a badge', value: 'reward.badge' },
+    { name: 'Give or revoke a profile title', value: 'reward.title' },
+    { name: 'Add streak-protection days', value: 'reward.streak-shield' },
+    { name: 'Claim or reset a seasonal gift', value: 'reward.seasonal-gift' },
+    { name: 'View active systems and server status', value: 'view.status' },
+    { name: 'List the largest player bounties', value: 'view.bounties' },
+    { name: 'Remove a player’s bounty (no refund)', value: 'view.clear-bounty' },
+    { name: 'View a player’s pending reminders', value: 'view.reminders' },
+    { name: 'View capsule settings and live drops', value: 'view.capsules' },
+    { name: 'View a player’s open trades', value: 'view.trades' },
+    { name: 'View the rated Tic-Tac-Toe ladder', value: 'view.ladder' },
+    { name: 'View recent dragon race results', value: 'view.races' },
+    { name: 'Choose channels for capsule drops', value: 'config.capsule-channels' },
+    { name: 'Set minimum and maximum capsule value', value: 'config.capsule-range' },
+    { name: 'Choose the weekly snapshot channel', value: 'config.snapshot-channel' },
+    { name: 'Reset a player’s Tic-Tac-Toe rating', value: 'config.reset-elo' },
+    { name: 'Cancel an open player trade', value: 'config.cancel-trade' },
+    { name: 'Add, remove, or list admin roles', value: 'config.admin-roles' },
+    { name: 'Turn admin audit logging on or off', value: 'config.admin-log' },
+    { name: 'Change a server channel, role, or value', value: 'config.server' },
+    { name: 'List saved server settings', value: 'config.server-list' },
+    { name: 'Limit a command to one channel', value: 'config.command-channel' },
+    { name: 'List command channel restrictions', value: 'config.command-channels' }
 ];
 
 module.exports = {
+    DRAGON_ADMIN_ACTIONS,
     data: hideFromMembers(new SlashCommandBuilder())
         .setName('dragon-admin')
-        .setDescription('[ADMIN] Manage dragons, economy systems, roles, and server settings')
+        .setDescription('[ADMIN] Choose a clear action, then fill only the options that action needs')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addStringOption(o => o.setName('action').setDescription('Choose an admin operation').setRequired(true).setAutocomplete(true))
-        .addUserOption(o => o.setName('target').setDescription('Target player'))
-        .addStringOption(o => o.setName('value').setDescription('Primary value: item, type, ID, or setting key').setAutocomplete(true))
-        .addStringOption(o => o.setName('details').setDescription('Secondary value: note, trait, setting key, trade id, or command name'))
-        .addStringOption(o => o.setName('setting-value').setDescription('Text value for a server setting'))
-        .addStringOption(o => o.setName('setting-name').setDescription('Server setting key').setAutocomplete(true))
-        .addStringOption(o => o.setName('server-setting').setDescription('Server configuration key'))
-        .addStringOption(o => o.setName('server-value').setDescription('Server value for this setting'))
-        .addStringOption(o => o.setName('setting-kind').setDescription('Setting to configure').addChoices(
+        .addStringOption(o => o.setName('action').setDescription('Choose the exact task; start and settle are separate').setRequired(true).setAutocomplete(true))
+        .addUserOption(o => o.setName('target').setDescription('Player to give something to or inspect'))
+        .addStringOption(o => o.setName('value').setDescription('Choose an egg, dragon, badge, title, or ore ID for the selected action').setAutocomplete(true))
+        .addStringOption(o => o.setName('details').setDescription('Trait ID, trade ID, or slash-command name, depending on the action'))
+        .addStringOption(o => o.setName('setting-value').setDescription('Text to save as an admin setting'))
+        .addStringOption(o => o.setName('setting-name').setDescription('Admin setting key to change').setAutocomplete(true))
+        .addStringOption(o => o.setName('server-setting').setDescription('Name of the server setting to change'))
+        .addStringOption(o => o.setName('server-value').setDescription('New text value for the server setting'))
+        .addStringOption(o => o.setName('setting-kind').setDescription('Choose which kind of server setting to save').addChoices(
             { name: 'Server setting', value: 'server' },
             { name: 'Command channel', value: 'command-channel' },
             { name: 'Game-ping role', value: 'game-ping-role' },
@@ -165,22 +166,22 @@ module.exports = {
             { name: 'Staff recipient role 3', value: 'staff-recipient-3' }
         ))
         .addRoleOption(o => o.setName('ping-role').setDescription('Role for a staff/game ping'))
-        .addStringOption(o => o.setName('extra').setDescription('Source text or value for a server setting'))
-        .addIntegerOption(o => o.setName('amount').setDescription('Primary number: id, days, minutes, or minimum'))
-        .addIntegerOption(o => o.setName('amount2').setDescription('Secondary number: level, pot, or maximum'))
-        .addBooleanOption(o => o.setName('toggle').setDescription('Optional action toggle (remove, force, clear-lock)'))
-        .addStringOption(o => o.setName('mode').setDescription('Admin role action: list, add, remove'))
-        .addStringOption(o => o.setName('scope').setDescription('Admin role or server-setting scope').addChoices(
+        .addStringOption(o => o.setName('extra').setDescription('Source note or extra setting value'))
+        .addIntegerOption(o => o.setName('amount').setDescription('ID/level/days; tournament duration in minutes; capsule minimum'))
+        .addIntegerOption(o => o.setName('amount2').setDescription('Dragon level, tournament prize pot, or capsule maximum'))
+        .addBooleanOption(o => o.setName('toggle').setDescription('Turn on an action flag: remove, force hatch, or clear gift lock'))
+        .addStringOption(o => o.setName('mode').setDescription('Admin-role operation: list, add, or remove'))
+        .addStringOption(o => o.setName('scope').setDescription('For roles: admin/audit; for settings: channel/role/server').addChoices(
             { name: 'Admin-command roles', value: 'admin' },
             { name: 'Audit-log roles', value: 'audit' },
             { name: 'Channel setting', value: 'channel' },
             { name: 'Role setting', value: 'role' },
             { name: 'Server value setting', value: 'server' }
         ))
-        .addChannelOption(o => o.setName('channel').setDescription('Channel setting or first capsule channel'))
-        .addChannelOption(o => o.setName('channel2').setDescription('Second capsule channel'))
-        .addChannelOption(o => o.setName('channel3').setDescription('Third capsule channel'))
-        .addRoleOption(o => o.setName('role').setDescription('Role to configure')),
+        .addChannelOption(o => o.setName('channel').setDescription('Destination channel or first capsule-drop channel'))
+        .addChannelOption(o => o.setName('channel2').setDescription('Second capsule-drop channel'))
+        .addChannelOption(o => o.setName('channel3').setDescription('Third capsule-drop channel'))
+        .addRoleOption(o => o.setName('role').setDescription('Role to add, remove, or assign')),
     async autocomplete(interaction) {
         if (!isAdminUser(interaction)) return interaction.respond([]);
         const focused = interaction.options.getFocused(true);
