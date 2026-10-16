@@ -12,6 +12,7 @@ const { renderTable, cardLabel, COLOR_EMOJI } = require('../systems/games/unoRen
 
 const UNO_CHANNEL_ID = '1560441728664731709';
 const TURN_MS = 60_000;
+const GRACE_MS = 5_000;
 const BOT_DELAY_MS = 1_500;
 const ROUND_BREAK_MS = 8_000;
 const LOBBY_MS = 10 * 60_000;
@@ -87,28 +88,31 @@ async function gamePayload(game, note = '') {
     const top = uno.topCard(engine);
     const png = renderTable(engine, { turnPlayerId: current?.id });
     const attachment = new AttachmentBuilder(png, { name: 'uno-table.png' });
+    // Discord relative timestamp: a live countdown the player can watch.
+    const deadline = game.turnDeadline && !current.isBot
+        ? `<t:${Math.floor(game.turnDeadline / 1000)}:R>`
+        : null;
     const turnLine = engine.status === 'playing'
-        ? `Turn: **${current.name}**${current.isBot ? ' (thinking…)' : ` — <@${current.id}>, ${Math.round(TURN_MS / 1000)}s on the clock`}`
+        ? `Turn: **${current.name}**${current.isBot ? ' (thinking…)' : ` — <@${current.id}>, ${deadline ?? `${Math.round(TURN_MS / 1000)}s`} left`}`
         : `Round over — next round starts shortly.`;
-    const embed = new EmbedBuilder()
-        .setColor(EMBED_COLORS[engine.color] ?? EMBED_COLORS.wild)
-        .setTitle(`🃏 UNO · Round ${engine.round}`)
-        .setDescription([
-            turnLine,
-            `Top card: **${cardLabel(top)}** ${COLOR_EMOJI[top.color] ?? ''} · Colour: **${(engine.color ?? '').toUpperCase()}**`,
-            engine.pendingDraw > 0 ? (engine.rulesMode === 'normal'
-                ? `⚠️ **+${engine.pendingDraw}** pending — draw it (no stacking in Normal).`
-                : engine.rulesMode === 'spicy'
-                    ? `⚠️ **+${engine.pendingDraw}** pending — stack any +2/+4 or draw.`
-                    : `⚠️ **+${engine.pendingDraw}** pending — stack a matching +2/+4 or draw.`) : '',
-            note ? `\n${note}` : '',
-            '',
-            standingsLines(engine)
-        ].filter(line => line !== '').join('\n'))
-        .setImage('attachment://uno-table.png')
-        .setFooter({ text: `First to ${engine.targetScore} points wins · ${uno.describeRules(engine.rulesMode)} · Open "My Hand" to play privately` })
-        .setTimestamp();
-    return { embeds: [embed], components: tableRows(game), files: [attachment], attachments: [] };
+    // Plain content + full-size attachment, deliberately NOT an embed: embeds
+    // shrink the table image, while an attached image renders near full width.
+    const content = [
+        `**🃏 UNO · Round ${engine.round}**`,
+        turnLine,
+        `Top card: **${cardLabel(top)}** ${COLOR_EMOJI[top.color] ?? ''} · Colour: **${(engine.color ?? '').toUpperCase()}**`,
+        engine.pendingDraw > 0 ? (engine.rulesMode === 'normal'
+            ? `⚠️ **+${engine.pendingDraw}** pending — draw it (no stacking in Normal).`
+            : engine.rulesMode === 'spicy'
+                ? `⚠️ **+${engine.pendingDraw}** pending — stack any +2/+4 or draw.`
+                : `⚠️ **+${engine.pendingDraw}** pending — stack a matching +2/+4 or draw.`) : '',
+        note ? `\n${note}` : '',
+        '',
+        standingsLines(engine),
+        '',
+        `_First to ${engine.targetScore} points wins · ${uno.describeRules(engine.rulesMode)} · Open "My Hand" to play privately`
+    ].filter(line => line !== '').join('\n');
+    return { content, components: tableRows(game), files: [attachment], attachments: [] };
 }
 
 async function updatePublic(game, note = '') {
@@ -170,8 +174,10 @@ function scheduleTurn(game) {
     const player = uno.currentPlayer(engine);
     const token = ++game.turnToken;
     if (player.isBot) {
+        game.turnDeadline = null;
         game.timer = setTimeout(() => runBotTurn(game, token), BOT_DELAY_MS);
     } else {
+        game.turnDeadline = Date.now() + TURN_MS;
         game.timer = setTimeout(() => turnTimedOut(game, token), TURN_MS);
     }
 }
@@ -218,13 +224,22 @@ async function runBotTurn(game, token) {
 
 async function turnTimedOut(game, token) {
     if (token !== game.turnToken || game.ended || game.engine.status !== 'playing') return;
+    const player = uno.currentPlayer(game.engine);
+    // The 60s are up, but the player gets 5 seconds of grace. Any card they
+    // play in that window reschedules the turn and kills this timer.
+    game.timer = setTimeout(() => graceExpired(game, token), GRACE_MS);
+    return updatePublic(game, `⏰ **${player.name}** is out of time — 5 seconds of grace to play a card!`);
+}
+
+async function graceExpired(game, token) {
+    if (token !== game.turnToken || game.ended || game.engine.status !== 'playing') return;
     const engine = game.engine;
     const player = uno.currentPlayer(engine);
     try {
         uno.drawCard(engine, player.id);
-        return afterAction(game, `⏰ ${player.name} ran out of time and drew.`);
+        return afterAction(game, `⏰ ${player.name} didn't play in grace and drew.`);
     } catch (error) {
-        console.error('UNO timeout failed:', error.message);
+        console.error('UNO grace draw failed:', error.message);
     }
 }
 
@@ -243,8 +258,13 @@ function handColorRows(gameId, cardId) {
     )];
 }
 
-async function showHand(interaction, game, player) {
+/* Pure payload builder for the private hand view (kept separate so tests can
+ * assert it never produces an empty select menu — Discord rejects those. */
+function buildHandPayload(game, player) {
     const engine = game.engine;
+    if (!player.hand.length) {
+        return { content: '🂠 **Your hand** — empty. The round may be over.', components: [] };
+    }
     const legal = new Set(uno.legalCards(engine, player.id).map(card => card.id));
     const isTurn = uno.currentPlayer(engine).id === player.id;
     const ordered = [...player.hand].sort((a, b) => Number(legal.has(b.id)) - Number(legal.has(a.id)));
@@ -261,11 +281,15 @@ async function showHand(interaction, game, player) {
         .addOptions(options);
     const extra = player.hand.length > 25 ? ' (showing the first 25)' : '';
     const turnName = uno.currentPlayer(engine).name;
-    return interaction.reply({
+    return {
         content: `🂠 **Your hand** — ${player.hand.length} cards${extra}\n${isTurn ? '🟢 It is your turn.' : `⏳ Waiting for ${turnName}.`}`,
-        components: [new ActionRowBuilder().addComponents(menu)],
-        ephemeral: true
-    });
+        components: [new ActionRowBuilder().addComponents(menu)]
+    };
+}
+
+async function showHand(interaction, game, player) {
+    const payload = buildHandPayload(game, player);
+    return interaction.reply({ ...payload, ephemeral: true });
 }
 
 async function playFromInteraction(interaction, game, player, cardId, color) {
@@ -453,3 +477,8 @@ module.exports = {
         return handleTable(interaction, game, verb, arg1, arg2);
     }
 };
+
+module.exports.buildHandPayload = buildHandPayload;
+module.exports.gamePayload = gamePayload;
+module.exports.TURN_MS = TURN_MS;
+module.exports.GRACE_MS = GRACE_MS;
