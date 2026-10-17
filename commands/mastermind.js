@@ -137,13 +137,14 @@ function createButtonRows(game, disabled = false) {
     const gameId = game.gameId;
     const rows = [];
 
-    // Color buttons, five per row.
+    // Color buttons, five per row, routed through the mm game prefix so the
+    // collector on the game message can handle them after fetchGameMessage.
     const colorCount = DIFFICULTY[game.difficulty].colors;
     for (let start = 0; start < colorCount; start += 5) {
         const colorRow = new ActionRowBuilder();
         for (let i = start; i < Math.min(start + 5, colorCount); i++) {
             colorRow.addComponents(
-                new ButtonBuilder().setCustomId(`mm_color_${gameId}_${i}`).setLabel(COLORS[i])
+                new ButtonBuilder().setCustomId(`mm:${gameId}:color:${i}`).setLabel(COLORS[i])
                     .setStyle(ButtonStyle.Primary).setDisabled(disabled)
             );
         }
@@ -151,11 +152,11 @@ function createButtonRows(game, disabled = false) {
     }
 
     const actionRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`mm_reverse_${gameId}`).setLabel('↩️ Undo').setStyle(ButtonStyle.Secondary).setDisabled(disabled),
-        new ButtonBuilder().setCustomId(`mm_clear_${gameId}`).setLabel('🧹 Clear').setStyle(ButtonStyle.Secondary).setDisabled(disabled),
-        new ButtonBuilder().setCustomId(`mm_submit_${gameId}`).setLabel('✅ Submit Guess').setStyle(ButtonStyle.Success).setDisabled(disabled),
-        new ButtonBuilder().setCustomId(`mm_hint_${gameId}`).setLabel(`💡 Hint (${HINT_COST})`).setStyle(ButtonStyle.Primary).setDisabled(disabled),
-        new ButtonBuilder().setCustomId(`mm_quit_${gameId}`).setLabel('🚪 Quit').setStyle(ButtonStyle.Danger).setDisabled(disabled)
+        new ButtonBuilder().setCustomId(`mm:${gameId}:reverse`).setLabel('↩️ Undo').setStyle(ButtonStyle.Secondary).setDisabled(disabled),
+        new ButtonBuilder().setCustomId(`mm:${gameId}:clear`).setLabel('🧹 Clear').setStyle(ButtonStyle.Secondary).setDisabled(disabled),
+        new ButtonBuilder().setCustomId(`mm:${gameId}:submit`).setLabel('✅ Submit Guess').setStyle(ButtonStyle.Success).setDisabled(disabled),
+        new ButtonBuilder().setCustomId(`mm:${gameId}:hint`).setLabel(`💡 Hint (${HINT_COST})`).setStyle(ButtonStyle.Primary).setDisabled(disabled),
+        new ButtonBuilder().setCustomId(`mm:${gameId}:quit`).setLabel('🚪 Quit').setStyle(ButtonStyle.Danger).setDisabled(disabled)
     );
     rows.push(actionRow);
 
@@ -321,15 +322,15 @@ function runCollector(message, game, interaction) {
         }
 
         try {
-            if (i.customId.startsWith(`mm_color_${game.gameId}_`)) {
-                const colorIndex = Number.parseInt(i.customId.split('_')[3], 10);
+            if (i.customId.startsWith(`mm:${game.gameId}:color:`)) {
+                const colorIndex = Number.parseInt(i.customId.split(':')[3], 10);
                 const color = COLORS[colorIndex];
                 if (currentGame.currentGuess.length < currentGame.secret.length) {
                     currentGame.currentGuess.push(color);
                 }
                 await i.deferUpdate();
                 await updateGameDisplay(game.gameId, i.client);
-            } else if (i.customId === `mm_submit_${game.gameId}`) {
+            } else if (i.customId === `mm:${game.gameId}:submit`) {
                 if (currentGame.currentGuess.length !== currentGame.secret.length) {
                     await i.reply({ content: `You must select exactly ${currentGame.secret.length} colors!` });
                     return;
@@ -349,15 +350,15 @@ function runCollector(message, game, interaction) {
                 } else {
                     await updateGameDisplay(game.gameId, i.client);
                 }
-            } else if (i.customId === `mm_clear_${game.gameId}`) {
+            } else if (i.customId === `mm:${game.gameId}:clear`) {
                 currentGame.currentGuess = [];
                 await i.deferUpdate();
                 await updateGameDisplay(game.gameId, i.client);
-            } else if (i.customId === `mm_reverse_${game.gameId}`) {
+            } else if (i.customId === `mm:${game.gameId}:reverse`) {
                 currentGame.currentGuess.pop();
                 await i.deferUpdate();
                 await updateGameDisplay(game.gameId, i.client);
-            } else if (i.customId === `mm_hint_${game.gameId}`) {
+            } else if (i.customId === `mm:${game.gameId}:hint`) {
                 if (currentGame.hintsUsed >= MAX_HINTS) {
                     await i.reply({ content: `You can use at most ${MAX_HINTS} hints per game.` });
                     return;
@@ -374,7 +375,7 @@ function runCollector(message, game, interaction) {
                 await i.reply({
                     content: `💡 Hint: position ${position + 1} contains ${color}. (−🪙${HINT_COST})` });
                 await updateGameDisplay(game.gameId, i.client);
-            } else if (i.customId === `mm_quit_${game.gameId}`) {
+            } else if (i.customId === `mm:${game.gameId}:quit`) {
                 await i.deferUpdate();
                 await endGame(game.gameId, 'quit', i.client);
                 collector.stop('quit');
@@ -508,6 +509,126 @@ async function showLeaderboard(interaction) {
     });
 }
 
+async function handleComponent(interaction) {
+    const parts = String(interaction.customId || '').split(':');
+    if (parts[0] !== 'mm') return;
+    const gameId = parts[1];
+    const action = parts[2];
+    const game = games.get(gameId);
+
+    if (!game || !game.gameActive || game.userId !== interaction.user.id) {
+        if (interaction.replied || interaction.deferred) {
+            return interaction.editReply({ content: 'This Mastermind game is no longer active.' }).catch(() => {});
+        }
+        return interaction.reply({ content: 'This Mastermind game is no longer active.', ephemeral: true }).catch(() => {});
+    }
+
+    const currentGame = games.get(gameId);
+    if (!currentGame) return;
+
+    const rawColorIndex = interaction.customId.split(':')[3];
+    const colorIndexRaw = rawColorIndex ? Number.parseInt(rawColorIndex, 10) : NaN;
+
+    if (action === 'color') {
+        const color = Number.isInteger(colorIndexRaw) ? COLORS[colorIndexRaw] : null;
+        if (!currentGame.gameActive || currentGame.currentGuess.length >= currentGame.secret.length || !color) {
+            await updateGameDisplay(gameId, interaction.client);
+            return;
+        }
+        currentGame.currentGuess.push(color);
+        await interaction.deferUpdate();
+        await updateGameDisplay(gameId, interaction.client);
+        return;
+    }
+
+    if (action === 'submit') {
+        if (!currentGame.gameActive || currentGame.currentGuess.length !== currentGame.secret.length) {
+            if (interaction.replied || interaction.deferred) {
+                return interaction.editReply({ content: `You must select exactly ${currentGame.secret.length} colors!` }).catch(() => {});
+            }
+            return interaction.reply({ content: `You must select exactly ${currentGame.secret.length} colors!`, ephemeral: true }).catch(() => {});
+        }
+        await interaction.deferUpdate();
+        const result = evaluateGuess(currentGame.secret, currentGame.currentGuess);
+        currentGame.guesses.push({ guess: [...currentGame.currentGuess], ...result });
+        currentGame.attempts++;
+        currentGame.currentGuess = [];
+
+        if (result.correctPosition === currentGame.secret.length) {
+            if (currentGame.gameActive) await endGame(gameId, 'win', interaction.client);
+            return;
+        }
+        if (currentGame.attempts >= currentGame.maxAttempts) {
+            if (currentGame.gameActive) await endGame(gameId, 'lose', interaction.client);
+            return;
+        }
+        await updateGameDisplay(gameId, interaction.client);
+        return;
+    }
+
+    if (action === 'clear') {
+        if (!currentGame.gameActive) {
+            await updateGameDisplay(gameId, interaction.client);
+            return;
+        }
+        currentGame.currentGuess = [];
+        await interaction.deferUpdate();
+        await updateGameDisplay(gameId, interaction.client);
+        return;
+    }
+
+    if (action === 'reverse') {
+        if (!currentGame.gameActive || currentGame.currentGuess.length === 0) {
+            await updateGameDisplay(gameId, interaction.client);
+            return;
+        }
+        currentGame.currentGuess.pop();
+        await interaction.deferUpdate();
+        await updateGameDisplay(gameId, interaction.client);
+        return;
+    }
+
+    if (action === 'hint') {
+        if (!currentGame.gameActive || currentGame.hintsUsed >= MAX_HINTS) {
+            if (interaction.replied || interaction.deferred) {
+                return interaction.editReply({ content: currentGame.hintsUsed >= MAX_HINTS
+                    ? `You can use at most ${MAX_HINTS} hints per game.`
+                    : 'This Mastermind game is no longer active.' }).catch(() => {});
+            }
+            return interaction.reply({ content: currentGame.hintsUsed >= MAX_HINTS
+                ? `You can use at most ${MAX_HINTS} hints per game.`
+                : 'This Mastermind game is no longer active.', ephemeral: true }).catch(() => {});
+        }
+        const userId = interaction.user.id;
+        const user = getUser(userId);
+        if (user.wallet < HINT_COST) {
+            if (interaction.replied || interaction.deferred) {
+                return interaction.editReply({ content: `You need 🪙${HINT_COST} in your wallet for a hint.` });
+            }
+            return interaction.reply({ content: `You need 🪙${HINT_COST} in your wallet for a hint.`, ephemeral: true }).catch(() => {});
+        }
+        casino.debitWallet(userId, 'mastermind', HINT_COST, 'Mastermind hint');
+        currentGame.hintsUsed++;
+        const position = currentGame.hintsUsed - 1;
+        const color = currentGame.secret[position];
+        await interaction.reply({
+            content: `💡 Hint: position ${position + 1} contains ${color}. (−🪙${HINT_COST})`
+        });
+        await updateGameDisplay(gameId, interaction.client);
+        return;
+    }
+
+    if (action === 'quit') {
+        if (!currentGame.gameActive) {
+            await updateGameDisplay(gameId, interaction.client);
+            return;
+        }
+        await interaction.deferUpdate();
+        await endGame(gameId, 'quit', interaction.client);
+        return;
+    }
+}
+
 module.exports = {
     createSecret,
     evaluateGuess,
@@ -531,6 +652,7 @@ module.exports = {
             { name: 'Expert', value: 'expert' }
         ))
         .addBooleanOption(o => o.setName('duplicates').setDescription('Allow duplicate colors')),
+    handleComponent,
     async execute(interaction) {
         try {
             await interaction.deferReply();

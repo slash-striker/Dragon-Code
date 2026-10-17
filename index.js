@@ -650,6 +650,10 @@ client.on(Events.InteractionCreate, async interaction => {
         // /uno-play table: lobby buttons, the table controls, hand menu and wild colour picks.
         await client.commands.get('uno-play')?.handleComponent?.(interaction);
         return;
+    } else if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('mm:')) {
+        // Mastermind — color picks, undo/clear/submit/hint/quit.
+        await client.commands.get('mastermind')?.handleComponent?.(interaction);
+        return;
     } else if (interaction.isButton() && interaction.customId.startsWith('capsule:claim:')) {
         // Random-drop credit capsule: first click wins, no collector needed.
         const capsuleDrops = require('./systems/economy/capsuleDrops');

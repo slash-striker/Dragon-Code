@@ -136,14 +136,17 @@ const GAME_DEFS = {
                 { id: 'lboard', label: '🏆 Leaderboard', style: BTN.secondary, overrides: { action: 'leaderboard' } }
             ]
         ]
-    },
-    mastermind: {
+    },    mastermind: {
         engine: './mastermind',
         emoji: '🧠',
         name: 'Mastermind',
         tagline: 'Crack the hidden color code — 🟢 right spot, 🟡 right color wrong spot.',
         buttons: [
-            [{ id: 'play', label: '▶ Play (easy)', style: BTN.primary, overrides: {} }],
+            [
+                { id: 'play', label: '▶ Play (easy)', style: BTN.primary, overrides: {} },
+                { id: 'daily', label: '📅 Daily', style: BTN.secondary, overrides: { difficulty: 'normal', mode: 'daily' } },
+                { id: 'sr', label: '⚡ Speedrun', style: BTN.secondary, overrides: { difficulty: 'normal', mode: 'speedrun' } }
+            ],
             [
                 { id: 'easy', label: '🟢 Easy', style: BTN.secondary, overrides: { difficulty: 'easy' } },
                 { id: 'normal', label: '🟡 Normal', style: BTN.secondary, overrides: { difficulty: 'normal' } },
@@ -152,7 +155,12 @@ const GAME_DEFS = {
             ],
             [
                 { id: 'dupes-on', label: '🎭 Duplicates ON', style: BTN.secondary, overrides: { difficulty: 'hard', duplicates: true } },
-                { id: 'mstats', label: '📊 Stats', style: BTN.secondary, overrides: { mode: 'stats' } }
+                { id: 'dupes-off', label: '🎭 Duplicates OFF', style: BTN.secondary, overrides: { difficulty: 'hard', duplicates: false } }
+            ],
+            [
+                { id: 'mstats', label: '📊 Stats', style: BTN.secondary, overrides: { mode: 'stats' } },
+                { id: 'mboard', label: '🏆 Leaderboard', style: BTN.secondary, overrides: { mode: 'leaderboard' } },
+                { id: 'mhelp', label: '❓ Help', style: BTN.secondary, overrides: { mode: 'help' } }
             ]
         ]
     },
@@ -367,6 +375,8 @@ function showConfigModal(interaction, game) {
     if (game === 'mastermind') {
         modal.addComponents(field('difficulty', 'Difficulty: easy/normal/hard/expert', false, 12));
         modal.addComponents(field('duplicates', 'Duplicates: yes / no', false, 3));
+        modal.addComponents(field('mode', 'Mode: play/daily/speedrun/stats/leaderboard/help', false, 32));
+        modal.addComponents(field('dailycode', 'Daily code override (optional)', false, 128));
     }
     if (game === '5dice') modal.addComponents(field('mode', 'Mode: play/daily/stats', false, 12));
     if (game === 'matchpairs' || game === 'rps' || game === 'tictactoe') {
