@@ -526,19 +526,8 @@ module.exports = {
             const ownerPinged = mentionedUserIds.includes(OWNER_USER_ID) && repliedUserId !== OWNER_USER_ID;
             const lightPinged = mentionedUserIds.includes(LIGHT_USER_ID) && repliedUserId !== LIGHT_USER_ID;
 
-            /*
-             * …and that includes the keywords. "slashy" typed inside a REPLY to
-             * him is still a reply, not a summon — quoting him and saying
-             * "slashy was here" must not ping him. The keyword scan for a
-             * target is skipped entirely while replying to that target; a
-             * reply to anyone else still summons normally.
-             */
-            const replyingToOwner = repliedUserId === OWNER_USER_ID;
-            const replyingToLight = repliedUserId === LIGHT_USER_ID;
-            const slashKeyword = replyingToOwner ? null : findKeyword(message.content);
-            const lightKeyword = replyingToLight
-                ? null
-                : findKeyword(message.content, LIGHT_KEYWORDS, [], { exactOnly: true });
+            const slashKeyword = findKeyword(message.content);
+            const lightKeyword = findKeyword(message.content, LIGHT_KEYWORDS, [], { exactOnly: true });
 
             const ownerWantsSummon = ownerPinged || Boolean(slashKeyword);
             const lightWantsSummon = lightPinged || Boolean(lightKeyword);
