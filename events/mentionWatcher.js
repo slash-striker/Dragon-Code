@@ -16,7 +16,7 @@ const LIGHT_USER_ID = '1543876836209991682';
  * be here momentarily" response instead. Both are suppressed when the target
  * user (1505829367631183963) is mentioned — that gets a 👀 only.
  */
-const KEYWORDS = ['sassy', 'slashstriker', 'slash striker', 'Slashstriker', 'SlashStriker', 'SLASH', 'slashy', 'salshy', 'slishy', 'slash', 'striker', 'salsh', 'slahs', 'Slahs', 'Slash', 'lsash', 'str1ker', 'スラッシー', 'Slasy', 'sslash', 'aslash', 'zzslash', 'zslash', 'slasht', 'slashstr1ker_', 'str1ker', 'slhs', 'sl;ash', 'sl;sh', 'sla;sh', 's;lash', 's;ash', 's;las', 's;lsah', 's;lsah', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 'slas;h', 'slas;h', 'sl;ash', 's;lash', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy'];
+const KEYWORDS = ['dawg', 'DAWG', 'sassy', 'slashstriker', 'slash striker', 'Slashstriker', 'SlashStriker', 'SLASH', 'slashy', 'salshy', 'slishy', 'slash', 'striker', 'salsh', 'slahs', 'Slahs', 'Slash', 'lsash', 'str1ker', 'スラッシー', 'Slasy', 'sslash', 'aslash', 'zzslash', 'zslash', 'slasht', 'slashstr1ker_', 'str1ker', 'slhs', 'sl;ash', 'sl;sh', 'sla;sh', 's;lash', 's;ash', 's;las', 's;lsah', 's;lsah', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 'slas;h', 'slas;h', 'sl;ash', 's;lash', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 'sas', 'sus', 'soos', 'soosssy', 'sossy', 'soossy', 'soosy', 'saaassssssyyyyyyy', 'sasssyyy', 'saassyy', 'ssaassyy', 'saaaasssssssyyy', 'the one with no gf', 'no gf', 'one with no gf', 'one with no girlfriend', 'no girlfriend', 'sassyfraslebuns', 'sassyfrazlebunz', 'sassyfraslebunz'];
 
 /*
  * ⚡ Light's own summon keywords — same fuzzy one-edit matching as SLASH's,
@@ -516,17 +516,49 @@ module.exports = {
             if (targetPinged) return;
 
             /*
+             * ↩️ REPLY ≠ PING — a reply carries the replied-to user in
+             * mentions.repliedUser (and many clients also embed a literal
+             * <@id> mention). Answering the owner's message is a normal
+             * conversation, so it must not summon him, must not answer with a
+             * panel, and must not burn the pinger's spam allowance.
+             */
+            const repliedUserId = message.mentions?.repliedUser?.id ?? null;
+            const ownerPinged = mentionedUserIds.includes(OWNER_USER_ID) && repliedUserId !== OWNER_USER_ID;
+            const lightPinged = mentionedUserIds.includes(LIGHT_USER_ID) && repliedUserId !== LIGHT_USER_ID;
+
+            /*
+             * …and that includes the keywords. "slashy" typed inside a REPLY to
+             * him is still a reply, not a summon — quoting him and saying
+             * "slashy was here" must not ping him. The keyword scan for a
+             * target is skipped entirely while replying to that target; a
+             * reply to anyone else still summons normally.
+             */
+            const replyingToOwner = repliedUserId === OWNER_USER_ID;
+            const replyingToLight = repliedUserId === LIGHT_USER_ID;
+            const slashKeyword = replyingToOwner ? null : findKeyword(message.content);
+            const lightKeyword = replyingToLight
+                ? null
+                : findKeyword(message.content, LIGHT_KEYWORDS, [], { exactOnly: true });
+
+            const ownerWantsSummon = ownerPinged || Boolean(slashKeyword);
+            const lightWantsSummon = lightPinged || Boolean(lightKeyword);
+
+            // Resolve both mutes up front: a ping the owner has switched off
+            // cannot be summoned, so it must not trip the spam guard either —
+            // telling people to stop spamming a ping they cannot fire is noise.
+            const slashActive = slashPingEnabled() && message.author.id !== OWNER_USER_ID && !isUserAsleep(OWNER_USER_ID);
+            const lightActive = lightPingEnabled() && message.author.id !== LIGHT_USER_ID && !isUserAsleep(LIGHT_USER_ID);
+            const anySummonLive =
+                (slashActive && ownerWantsSummon) || (lightActive && lightWantsSummon);
+
+            /*
              * 🚫 PING-RATE LIMIT — one shared check for BOTH summon systems
              * (slash + light). Three summon pings (keyword OR direct mention)
              * within one minute lock the pinger out of BOTH targets for ten
              * minutes. The owner and Light are exempt — they cannot lock
              * themselves out of their own summons.
              */
-            const summonsRequested =
-                mentionedUserIds.includes(OWNER_USER_ID) ||
-                mentionedUserIds.includes(LIGHT_USER_ID) ||
-                Boolean(findKeyword(message.content)) ||
-                Boolean(findKeyword(message.content, LIGHT_KEYWORDS, [], { exactOnly: true }));
+            const summonsRequested = anySummonLive;
             if (summonsRequested &&
                 message.author.id !== OWNER_USER_ID &&
                 message.author.id !== LIGHT_USER_ID) {
@@ -550,14 +582,9 @@ module.exports = {
              * even while he is online. Fully silenced only via
              * /toggle-ping ping:slash (the 👀 reaction above still fires).
              */
-            // The host never summons himself, and nothing pings him during his own sleep window.
-            const slashActive = slashPingEnabled() && message.author.id !== OWNER_USER_ID && !isUserAsleep(OWNER_USER_ID);
             if (slashActive) {
-                const ownerUserPinged = mentionedUserIds.includes(OWNER_USER_ID);
-                const keyword = findKeyword(message.content);
-
                 // Direct mention of the owner → "he will be here momentarily".
-                if (ownerUserPinged) {
+                if (ownerPinged) {
                     const state = await getSleepState(message.client);
                     await message.reply({
                         content: buildMomentaryPanel(state),
@@ -567,7 +594,7 @@ module.exports = {
                 }
 
                 // Keyword → ping the OWNER USER with the summon panel.
-                if (keyword) {
+                if (slashKeyword) {
                     const state = await getSleepState(message.client);
                     await message.reply({
                         content: `<@${OWNER_USER_ID}>\n${buildSummonPanel(state)}`,
@@ -575,12 +602,7 @@ module.exports = {
                     }).catch(() => {});
                     return;
                 }
-            } else if (
-                message.author.id !== OWNER_USER_ID && (
-                    mentionedUserIds.includes(OWNER_USER_ID) ||
-                    findKeyword(message.content)
-                )
-            ) {
+            } else if (message.author.id !== OWNER_USER_ID && ownerWantsSummon) {
                 console.log(
                     '[slash-ping] muted — suppressed a trigger in #' + (message.channel?.name ?? message.channelId)
                 );
@@ -592,13 +614,9 @@ module.exports = {
              * "momentarily" panel; keywords ("light", "lightning" + one-edit
              * typos) ping him.
              */
-            const lightUserPinged = mentionedUserIds.includes(LIGHT_USER_ID);
-            const lightKeyword = findKeyword(message.content, LIGHT_KEYWORDS, [], { exactOnly: true });
-
             // Light never summons himself, and nothing pings him during his own sleep window.
-            const lightActive = lightPingEnabled() && message.author.id !== LIGHT_USER_ID && !isUserAsleep(LIGHT_USER_ID);
             if (lightActive) {
-                if (lightUserPinged) {
+                if (lightPinged) {
                     await message.reply({
                         content: buildMomentaryPanel(null, LIGHT_USER_ID),
                         allowedMentions: { parse: [] },
@@ -612,7 +630,7 @@ module.exports = {
                         allowedMentions: { users: [LIGHT_USER_ID], parse: [] },
                     }).catch(() => {});
                 }
-            } else if (message.author.id !== LIGHT_USER_ID && (lightUserPinged || lightKeyword)) {
+            } else if (message.author.id !== LIGHT_USER_ID && lightWantsSummon) {
                 console.log(
                     '[light-ping] muted — suppressed a trigger in #' + (message.channel?.name ?? message.channelId)
                 );

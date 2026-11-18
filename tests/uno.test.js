@@ -331,3 +331,81 @@ test('uno-play: turn clock is 60s with a 5s grace period', () => {
     assert.equal(command.TURN_MS, 60_000);
     assert.equal(command.GRACE_MS, 5_000);
 });
+
+test('uno two seats: skip, reverse and unanswerable draws keep the turn with the player', () => {
+    const two = [{ id: 'a', name: 'Ann' }, { id: 'b', name: 'Ben' }];
+    for (const value of ['skip', 'reverse', 'draw2', 'wild4']) {
+        const state = uno.createGame({ players: two });
+        state.direction = 1;
+        const first = uno.currentPlayer(state);
+        const other = state.players.find(p => p.id !== first.id);
+        withTopCard(state, { id: 'top', color: 'red', value: '5' });
+        // A +4 may only be thrown with no card of the active colour in hand.
+        first.hand = value === 'wild4'
+            ? [{ id: 'c', color: 'wild', value }, { id: 'k', color: 'blue', value: '1' }]
+            : [{ id: 'c', color: 'red', value }, { id: 'k', color: 'blue', value: '1' }];
+        // The opponent holds nothing stackable, so they are skipped.
+        other.hand = [{ id: 'o1', color: 'blue', value: '1' }, { id: 'o2', color: 'blue', value: '2' }];
+        const before = other.hand.length;
+
+        uno.playCard(state, first.id, 'c', 'green');
+
+        assert.equal(uno.currentPlayer(state).id, first.id, `${value} keeps the turn with the player`);
+        if (value === 'draw2') assert.equal(other.hand.length, before + 2, 'the skipped player still takes +2');
+        if (value === 'wild4') assert.equal(other.hand.length, before + 4, 'the skipped player still takes +4');
+    }
+});
+
+test('uno two seats: a stackable answer still gets the opponent their turn', () => {
+    const state = uno.createGame({
+        players: [{ id: 'a', name: 'Ann' }, { id: 'b', name: 'Ben' }],
+        rulesMode: 'stack'
+    });
+    state.direction = 1;
+    const first = uno.currentPlayer(state);
+    const other = state.players.find(p => p.id !== first.id);
+    withTopCard(state, { id: 'top', color: 'red', value: '5' });
+    first.hand = [{ id: 'c', color: 'red', value: 'draw2' }, { id: 'k', color: 'red', value: '1' }];
+    other.hand = [{ id: 'stack', color: 'blue', value: 'draw2' }, { id: 'o2', color: 'blue', value: '2' }];
+
+    uno.playCard(state, first.id, 'c');
+    assert.equal(uno.currentPlayer(state).id, other.id, 'the opponent may answer the pending draw');
+    assert.equal(state.pendingDraw, 2);
+});
+
+test('uno two seats: going again twice in a row never burns the deck', () => {
+    const state = uno.createGame({
+        players: [{ id: 'a', name: 'Ann' }, { id: 'b', name: 'Ben' }]
+    });
+    const first = uno.currentPlayer(state);
+    withTopCard(state, { id: 'top', color: 'red', value: '5' });
+    first.hand = [
+        { id: 's1', color: 'red', value: 'skip' },
+        { id: 's2', color: 'red', value: 'skip' },
+        { id: 'z', color: 'blue', value: '3' }
+    ];
+    const total = () => state.players.reduce((s, p) => s + p.hand.length, 0) + state.deck.length + state.discard.length;
+    const before = total();
+    uno.playCard(state, first.id, 's1');
+    uno.playCard(state, first.id, 's2');
+    assert.equal(uno.currentPlayer(state).id, first.id);
+    assert.equal(total(), before, 'no card is created or lost');
+});
+
+test('withCount keeps the channel decoration and only swaps the number', () => {
+    const { withCount } = require('../systems/discord/liveCounters');
+    assert.equal(withCount('〘___ Boosts: 0 ___〙', 12), '〘___ Boosts: 12 ___〙');
+    assert.equal(withCount('〘Total Users: 37〙', 41), '〘Total Users: 41〙');
+    assert.equal(withCount('〘Goal: 37/100〙', 40), '〘Goal: 40/100〙');
+    assert.equal(withCount('〘___ Boosts ___〙', 3), '〘___ Boosts 3 ___〙');
+});
+
+test('time parser: 24:00 is midnight, and a 24-hour clock still round-trips', () => {
+    const { parseTimeInput, normalizeTimeInput } = require('../systems/util/timeFormat');
+    assert.equal(parseTimeInput('24:00'), 0);
+    assert.equal(parseTimeInput('23:00'), 23 * 60);
+    assert.equal(normalizeTimeInput('24:00'), '00:00');
+    assert.equal(normalizeTimeInput('11 pm'), '23:00');
+    assert.equal(normalizeTimeInput('24:30'), null);
+    assert.equal(normalizeTimeInput('7'), '07:00');
+});

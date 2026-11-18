@@ -8,10 +8,13 @@ const CORNER_LABELS = { skip: 'SKIP', reverse: 'REV', draw2: '+2', wild: 'WILD',
 
 // Seat centres (player index 0 sits at the bottom).
 const SEATS = {
-    2: [[450, 448], [450, 92]],
-    3: [[450, 448], [130, 180], [770, 180]],
-    4: [[450, 448], [130, 290], [450, 92], [770, 290]]
+    2: [[450, 462], [450, 120]],
+    3: [[450, 462], [148, 190], [752, 190]],
+    4: [[450, 462], [148, 296], [450, 120], [752, 296]]
 };
+
+const WIDTH = 900;
+const HEIGHT = 580;
 
 let canvasLib = null;
 function loadCanvas() {
@@ -112,7 +115,8 @@ function drawCard(ctx, card, x, y, w = 110, h = 160, { back = false } = {}) {
     ctx.fillText(label, 0, 0);
     ctx.restore();
 
-    ctx.fillStyle = '#ffffff';
+    // Corner label: dark ink on the pale cards so it never washes out.
+    ctx.fillStyle = card.color === 'yellow' || card.color === 'green' ? '#132015' : '#ffffff';
     ctx.font = `bold ${Math.round(w * 0.16)}px sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
@@ -120,83 +124,127 @@ function drawCard(ctx, card, x, y, w = 110, h = 160, { back = false } = {}) {
     ctx.restore();
 }
 
-function drawSeat(ctx, player, cx, cy, isTurn) {
-    const w = 230;
-    const h = 96;
+/* One seat plate: seat number, name, cards, points, turn / UNO badge. */
+function drawSeat(ctx, player, cx, cy, { isTurn = false, seat = 0 } = {}) {
+    const w = 252;
+    const h = 104;
     const x = cx - w / 2;
     const y = cy - h / 2;
-    roundRect(ctx, x, y, w, h, 16);
-    ctx.fillStyle = isTurn ? 'rgba(74, 46, 150, 0.95)' : 'rgba(14, 10, 40, 0.9)';
+
+    roundRect(ctx, x, y, w, h, 18);
+    const fill = ctx.createLinearGradient(x, y, x, y + h);
+    fill.addColorStop(0, isTurn ? 'rgba(92, 58, 176, 0.98)' : 'rgba(17, 13, 46, 0.94)');
+    fill.addColorStop(1, isTurn ? 'rgba(52, 30, 110, 0.98)' : 'rgba(8, 6, 24, 0.94)');
+    ctx.fillStyle = fill;
     ctx.fill();
-    ctx.lineWidth = isTurn ? 4 : 2;
-    ctx.strokeStyle = isTurn ? '#ffd23f' : 'rgba(255, 255, 255, 0.18)';
+    ctx.lineWidth = isTurn ? 3 : 1.5;
+    ctx.strokeStyle = isTurn ? '#ffd23f' : 'rgba(255, 255, 255, 0.14)';
     ctx.stroke();
 
-    ctx.textAlign = 'left';
+    // Seat number chip.
+    roundRect(ctx, x + 12, y + 12, 26, 20, 6);
+    ctx.fillStyle = isTurn ? '#ffd23f' : 'rgba(255, 255, 255, 0.14)';
+    ctx.fill();
+    ctx.fillStyle = isTurn ? '#1a1030' : '#cfd3ff';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 19px sans-serif';
-    ctx.fillText(`${player.isBot ? '[BOT] ' : ''}${player.name}`.slice(0, 22), x + 14, y + 20);
-    ctx.fillStyle = '#b8c0ff';
-    ctx.font = '14px sans-serif';
-    ctx.fillText(`${player.hand.length} cards · ${player.score} pts`, x + 14, y + 42);
+    ctx.fillText(String(seat + 1), x + 25, y + 22);
 
-    const shown = Math.min(player.hand.length, 12);
+    // Name.
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillText(`${player.isBot ? '[BOT] ' : ''}${player.name}`.slice(0, 20), x + 46, y + 23);
+
+    // Cards + points.
+    ctx.fillStyle = '#b8c0ff';
+    ctx.font = '13px sans-serif';
+    ctx.fillText(`${player.hand.length} cards · ${player.score} pts`, x + 14, y + 48);
+
+    const shown = Math.min(player.hand.length, 11);
     for (let i = 0; i < shown; i++) {
-        drawCard(ctx, null, x + 14 + i * 16, y + 58, 14, 22, { back: true });
+        drawCard(ctx, null, x + 14 + i * 17, y + 62, 15, 24, { back: true });
     }
 
-    if (player.hand.length === 1) {
-        roundRect(ctx, x + w - 70, y + 10, 58, 24, 8);
-        ctx.fillStyle = player.calledUno ? COLOR_HEX.green : COLOR_HEX.red;
+    // Turn / UNO badge.
+    const oneLeft = player.hand.length === 1;
+    if (isTurn || oneLeft) {
+        const label = oneLeft ? (player.calledUno ? 'UNO!' : 'NO UNO') : 'TURN';
+        const chipW = oneLeft ? 64 : 46;
+        roundRect(ctx, x + w - chipW - 12, y + 12, chipW, 20, 6);
+        ctx.fillStyle = oneLeft ? (player.calledUno ? COLOR_HEX.green : COLOR_HEX.red) : '#ffd23f';
         ctx.fill();
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 13px sans-serif';
+        ctx.fillStyle = oneLeft ? '#07130d' : '#1a1030';
+        ctx.font = 'bold 11px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(player.calledUno ? 'UNO!' : 'NO UNO', x + w - 41, y + 22);
+        ctx.fillText(label, x + w - chipW / 2 - 12, y + 22);
     }
 }
 
 /* Render the whole table. Returns a PNG buffer. */
 function renderTable(state, { turnPlayerId = null } = {}) {
     const { createCanvas } = loadCanvas();
-    const W = 900;
-    const H = 560;
-    const canvas = createCanvas(W, H);
+    const canvas = createCanvas(WIDTH, HEIGHT);
     const ctx = canvas.getContext('2d');
 
-    const bg = ctx.createRadialGradient(W / 2, H / 2, 60, W / 2, H / 2, 620);
+    // Table felt.
+    const bg = ctx.createRadialGradient(WIDTH / 2, HEIGHT / 2, 60, WIDTH / 2, HEIGHT / 2, 640);
     bg.addColorStop(0, '#22195c');
     bg.addColorStop(1, '#05060f');
     ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
+    // Header bar.
+    const header = ctx.createLinearGradient(0, 0, WIDTH, 0);
+    header.addColorStop(0, 'rgba(9, 7, 26, 0.98)');
+    header.addColorStop(0.5, 'rgba(44, 24, 96, 0.98)');
+    header.addColorStop(1, 'rgba(9, 7, 26, 0.98)');
+    ctx.fillStyle = header;
+    ctx.fillRect(0, 0, WIDTH, 68);
+    ctx.fillStyle = '#ffd23f';
+    ctx.font = 'bold 30px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('UNO', 24, 34);
+    ctx.fillStyle = '#b8c0ff';
+    ctx.font = '12px sans-serif';
+    ctx.fillText('NEON TABLE', 24, 54);
+
+    const direction = state.direction === 1 ? 'CLOCKWISE' : 'COUNTER-CLOCKWISE';
+    const modeLabel = `${state.rulesMode ?? 'stack'} mode`.toUpperCase();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 17px sans-serif';
+    ctx.fillText(`ROUND ${state.round}  ·  ${modeLabel}  ·  FIRST TO ${state.targetScore}`, WIDTH / 2 + 30, 30);
+    ctx.fillStyle = '#8f9bff';
+    ctx.font = '13px sans-serif';
+    ctx.fillText(`${direction}  ·  ${state.players.length} SEATS`, WIDTH / 2 + 30, 50);
+
+    // Felt ring — sized to the piles and the centre furniture, not the seats,
+    // so the plates always read as sitting AROUND the table.
     ctx.beginPath();
-    ctx.ellipse(W / 2, 280, 360, 185, 0, 0, Math.PI * 2);
+    ctx.ellipse(WIDTH / 2, 292, 300, 150, 0, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(16, 92, 78, 0.55)';
     ctx.fill();
     ctx.lineWidth = 4;
     ctx.strokeStyle = 'rgba(120, 255, 220, 0.35)';
     ctx.stroke();
 
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#ffd23f';
-    ctx.font = 'bold 26px sans-serif';
-    ctx.fillText('UNO', 22, 30);
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#b8c0ff';
-    ctx.font = '16px sans-serif';
-    const direction = state.direction === 1 ? 'Clockwise' : 'Counter-clockwise';
-    const modeLabel = `${state.rulesMode ?? 'stack'} mode`.toUpperCase();
-    ctx.fillText(`${direction} · Round ${state.round} · ${modeLabel} · First to ${state.targetScore}`, W / 2, 30);
-
-    drawCard(ctx, null, 300, 165, 110, 160, { back: true });
+    // Piles.
+    drawCard(ctx, null, 312, 176, 108, 156, { back: true });
     const top = uno.topCard(state);
-    if (top) drawCard(ctx, top, 420, 165, 110, 160);
+    if (top) drawCard(ctx, top, 462, 176, 108, 156);
 
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+    ctx.font = '11px sans-serif';
+    ctx.fillText('DECK', 366, 348);
+    ctx.fillText('DISCARD', 516, 348);
+
+    // Colour chip + pending banner.
     ctx.beginPath();
-    ctx.arc(W / 2 - 40, 350, 13, 0, Math.PI * 2);
+    ctx.arc(WIDTH / 2 - 74, 378, 11, 0, Math.PI * 2);
     ctx.fillStyle = COLOR_HEX[state.color] ?? '#ffffff';
     ctx.fill();
     ctx.lineWidth = 3;
@@ -204,28 +252,37 @@ function renderTable(state, { turnPlayerId = null } = {}) {
     ctx.stroke();
     ctx.textAlign = 'left';
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 18px sans-serif';
-    ctx.fillText(`Colour: ${(state.color ?? '').toUpperCase()}`, W / 2 - 20, 350);
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillText(`COLOUR: ${(state.color ?? '').toUpperCase()}`, WIDTH / 2 - 54, 378);
+
     if (state.pendingDraw > 0) {
         ctx.textAlign = 'center';
-        ctx.fillStyle = COLOR_HEX.red;
-        ctx.font = 'bold 20px sans-serif';
-        ctx.fillText(`+${state.pendingDraw} pending`, W / 2, 378);
+        roundRect(ctx, WIDTH / 2 - 82, 396, 164, 30, 10);
+        ctx.fillStyle = 'rgba(255, 59, 92, 0.9)';
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 15px sans-serif';
+        ctx.fillText(`+${state.pendingDraw} PENDING`, WIDTH / 2, 411);
     }
 
     const seats = SEATS[state.players.length] ?? SEATS[4];
     state.players.forEach((player, index) => {
-        const [cx, cy] = seats[index];
-        drawSeat(ctx, player, cx, cy, player.id === turnPlayerId);
+        const [cx, cy] = seats[index] ?? SEATS[4][index];
+        drawSeat(ctx, player, cx, cy, {
+            isTurn: player.id === turnPlayerId,
+            seat: index
+        });
     });
 
-    const note = state.log[state.log.length - 1] ?? '';
+    // Footer strip with the last table event.
+    ctx.fillStyle = 'rgba(6, 5, 20, 0.92)';
+    ctx.fillRect(0, HEIGHT - 52, WIDTH, 52);
     ctx.textAlign = 'center';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-    ctx.font = '16px sans-serif';
-    ctx.fillText(note.slice(0, 90), W / 2, H - 22);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.82)';
+    ctx.font = '15px sans-serif';
+    ctx.fillText((state.log[state.log.length - 1] ?? '').slice(0, 96), WIDTH / 2, HEIGHT - 26);
 
     return canvas.toBuffer('image/png');
 }
 
-module.exports = { renderTable, cardLabel, COLOR_HEX, COLOR_EMOJI };
+module.exports = { renderTable, cardLabel, COLOR_HEX, COLOR_EMOJI, WIDTH, HEIGHT };

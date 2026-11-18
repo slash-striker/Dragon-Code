@@ -13,6 +13,18 @@ const {
 
 const db = require('../database');
 const tttElo = require('../systems/economy/tttElo');
+const neonUI = require('../systems/games/neonUI');
+const { isHighTech } = require('../systems/economy/uiStyleHelper');
+
+/*
+ * 🖥️ TWO LOOKS, ONE HUB — every /games surface reads the player's saved style
+ * from /ui-style (or the toggle button in the lounge):
+ *   high-tech → `◢ ═══ TITLE ═══ ◣` with a ```ansi terminal panel
+ *   normal    → plain embeds with the same information, no terminal dressing
+ */
+function styledTitle(userId, highTech, normal) {
+    return isHighTech(userId) ? neonUI.neonTitle(highTech) : normal;
+}
 
 /*
  * 🎮 /games — one slash slot for all eight minigames.
@@ -266,20 +278,39 @@ function facadeFor(interaction, optionOverrides = {}) {
 /* ---------- Lounge + panel rendering ---------- */
 
 function loungeEmbed(user) {
-    return new EmbedBuilder()
-        .setColor(0x00d4ff)
-        .setTitle('🎮 GAME LOUNGE')
-        .setDescription(
-            '**Pick a game from the menu below** to open its setup panel. Choose a difficulty, mode, or wager there, or open **Custom settings**.\n\n' +
-            Object.values(GAME_DEFS).map(g => `${g.emoji} **${g.name}** — ${g.tagline}`).join('\n') +
-            '\n\n🏆 **Tic-Tac-Toe Ladder** — rated player-vs-player matches with Elo ratings.\n' +
-            'Prefer slash options? `/games game:Hangman difficulty:hard` starts directly. A bare `/games` opens this menu.'
-        )
-        .setFooter({ text: `${user.tag ?? user.username ?? 'Player'} • interactive game menu` })
-        .setTimestamp();
+    const gamesList = Object.values(GAME_DEFS);
+    const { RESET, BOLD, DIM, MAGENTA, YELLOW } = neonUI.ANSI;
+
+    const techLines = [
+        `${MAGENTA}◈ GAME LOUNGE${RESET}`,
+        '',
+        ...gamesList.map(g => `${g.emoji} ${BOLD}${g.name}${RESET} — ${g.tagline}`),
+        '',
+        `🏆 ${BOLD}TIC-TAC-TOE LADDER${RESET} — rated player-vs-player Elo.`,
+        `${DIM}Select a game below to open its setup panel.${RESET}`
+    ];
+
+    const plainLines = [
+        '**Pick a game from the menu below** to open its setup panel. Choose a difficulty, mode, or wager there, or open **Custom settings**.',
+        '',
+        ...gamesList.map(g => `${g.emoji} **${g.name}** — ${g.tagline}`),
+        '',
+        '🏆 **Tic-Tac-Toe Ladder** — rated player-vs-player matches with Elo ratings.',
+        'Prefer slash options? `/games game:Hangman difficulty:hard` starts directly. A bare `/games` opens this menu.'
+    ];
+
+    return neonUI.neonEmbed({
+        userId: user?.id,
+        title: 'GAME LOUNGE',
+        normalTitle: '🎮 Game Lounge',
+        lines: techLines,
+        normalLines: plainLines,
+        color: neonUI.NEON.cyan,
+        footer: `${user.tag ?? user.username ?? 'Player'} • interactive game menu`
+    });
 }
 
-function buildLoungeRows() {
+function buildLoungeRows(user) {
     const gameMenu = new StringSelectMenuBuilder()
         .setCustomId('games:select')
         .setPlaceholder('Choose a game to see its options…')
@@ -294,9 +325,16 @@ function buildLoungeRows() {
         .setLabel('Tic-Tac-Toe Ladder')
         .setEmoji('🏆')
         .setStyle(ButtonStyle.Success);
+    // One click swaps between the high-tech terminal panel and the plain
+    // layout — no trip to /ui-style needed.
+    const styleButton = new ButtonBuilder()
+        .setCustomId('games:style')
+        .setLabel(isHighTech(user?.id) ? 'Switch to normal UI' : 'Switch to high-tech UI')
+        .setEmoji('🖥️')
+        .setStyle(ButtonStyle.Secondary);
     return [
         new ActionRowBuilder().addComponents(gameMenu),
-        new ActionRowBuilder().addComponents(ladderButton)
+        new ActionRowBuilder().addComponents(ladderButton, styleButton)
     ];
 }
 
@@ -315,20 +353,40 @@ function disabledLoungeRows() {
 
 function gamePanelEmbed(game, user) {
     const def = GAME_DEFS[game];
-    return new EmbedBuilder()
-        .setColor(0x00d4ff)
-        .setTitle(`${def.emoji} ${def.name.toUpperCase()} — SETUP`)
-        .setDescription(
-            `${def.tagline}\n\n` +
-            `⚙️ **Setting buttons start the game instantly** — anything you don't pick falls back to the game's own defaults.\n` +
-            `✋ **No slash inputs needed** — buttons cover everything; leaving the slash options empty is normal.\n` +
-            `🚀 **Custom settings** opens a dialog for the fiddly options (all fields optional unless marked required).\n` +
-            `↩️ **Back to lounge** returns to the game list.` +
-            (game === 'highlow'
-                ? `\n\n📈 High/Low quick buttons start at their shown bet; open the dialog for any wager 10-1000.`
-                : ''))
-        .setFooter({ text: `${user.tag ?? user.username ?? 'Player'} • panels stay live across restarts` })
-        .setTimestamp();
+    const { RESET, BOLD, DIM, CYAN } = neonUI.ANSI;
+    const tips = [
+        'Setting buttons start the game instantly — anything you do not pick falls back to the game default.',
+        'No slash inputs are needed — the buttons cover everything.',
+        'Custom settings opens a dialog for the fiddly options.',
+        'Back to lounge returns to the game list.'
+    ];
+    const extra = game === 'highlow'
+        ? 'High/Low quick buttons start at their shown bet; open the dialog for any wager 10-1000.'
+        : null;
+
+    const techLines = [
+        `${CYAN}${BOLD}${def.emoji} ${def.name.toUpperCase()}${RESET}`,
+        `${DIM}${def.tagline}${RESET}`,
+        '',
+        ...tips.map(tip => `${CYAN}›${RESET} ${tip}`),
+        ...(extra ? ['', `${DIM}${extra}${RESET}`] : [])
+    ];
+    const plainLines = [
+        `${def.tagline}`,
+        '',
+        ...tips.map(tip => `• ${tip}`),
+        ...(extra ? ['', `📈 ${extra}`] : [])
+    ];
+
+    return neonUI.neonEmbed({
+        userId: user?.id,
+        title: `${def.name.toUpperCase()} SETUP`,
+        normalTitle: `${def.emoji} ${def.name} — Setup`,
+        lines: techLines,
+        normalLines: plainLines,
+        color: neonUI.NEON.cyan,
+        footer: `${user.tag ?? user.username ?? 'Player'} • panels stay live across restarts`
+    });
 }
 
 function buildPanelRows(game) {
@@ -422,7 +480,7 @@ async function handleModal(interaction) {
 
 async function runLounge(interaction) {
     const embed = loungeEmbed(interaction.user);
-    const rows = buildLoungeRows();
+    const rows = buildLoungeRows(interaction.user);
 
     /*
      * Same pattern as the /mining hub: the collector exists ONLY to disable
@@ -656,7 +714,7 @@ function ladderPanelPayload(userId) {
 
     const embed = new EmbedBuilder()
         .setColor(0xa855f7)
-        .setTitle('🏆 TIC-TAC-TOE ELO LADDER')
+        .setTitle(styledTitle(userId, 'TIC-TAC-TOE ELO LADDER', '🏆 Tic-Tac-Toe Ladder'))
         .setDescription([
             '**Your rating:** **' + (Number(record.elo) || tttElo.START_ELO) + '** Elo' +
                 (rank ? ' · rank **#' + rank + '**' : '') + (tag ? ' · ' + tag : ''),
@@ -715,7 +773,7 @@ function clearChallenge(challengerId) {
 function challengePayload(challengerId, opponentId) {
     const embed = new EmbedBuilder()
         .setColor(0x00d4ff)
-        .setTitle('⚔️ RANKED TIC-TAC-TOE CHALLENGE')
+        .setTitle(styledTitle(challengerId, 'RANKED TIC-TAC-TOE CHALLENGE', '⚔️ Ranked Tic-Tac-Toe Challenge'))
         .setDescription([
             '<@' + challengerId + '> has challenged <@' + opponentId + '> to a **rated** match.',
             '',
@@ -786,7 +844,7 @@ function matchPayload(key, match, note) {
     const current = turnPlayerId(match);
     const embed = new EmbedBuilder()
         .setColor(0x00d4ff)
-        .setTitle('⭕ RANKED TIC-TAC-TOE')
+        .setTitle(styledTitle(String(match.x), 'RANKED TIC-TAC-TOE', '⭕ Ranked Tic-Tac-Toe'))
         .setDescription([
             boardText(match.board),
             '',
@@ -1080,6 +1138,17 @@ module.exports = {
         const [, verb, panelGame, btnId] = rawId.split(':');
         // The lounge's 🏆 button carries no game segment.
         if (verb === 'ladder') return handleLadderComponent(interaction);
+        // 🖥️ UI toggle — also carries no game segment, so it is handled before
+        // the game lookup below would reject the id.
+        if (verb === 'style') {
+            const next = isHighTech(interaction.user.id) ? 'normal' : 'hightech';
+            db.prepare('INSERT INTO users (userId, uiStyle) VALUES (?, ?) ON CONFLICT(userId) DO UPDATE SET uiStyle = excluded.uiStyle')
+                .run(interaction.user.id, next);
+            return interaction.update({
+                embeds: [loungeEmbed(interaction.user)],
+                components: buildLoungeRows(interaction.user)
+            }).catch(() => {});
+        }
         const selectedGame = verb === 'select' ? interaction.values?.[0] : panelGame;
         if (!selectedGame || !GAME_DEFS[selectedGame]) return interaction.deferUpdate().catch(() => {});
 
@@ -1092,7 +1161,7 @@ module.exports = {
         if (verb === 'back') {
             return interaction.update({
                 embeds: [loungeEmbed(interaction.user)],
-                components: buildLoungeRows()
+                components: buildLoungeRows(interaction.user)
             }).catch(() => {});
         }
         const game = selectedGame;

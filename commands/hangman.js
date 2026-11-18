@@ -12,6 +12,7 @@ const {
     ComponentType
 } = require('discord.js');
 const casino = require('../systems/casino/casinoManager');
+const neonUI = require('../systems/games/neonUI');
 const {
     getRemainingTime,
     formatRemainingTime,
@@ -318,34 +319,61 @@ function createGameEmbed(gameId, game, gameOver = false, result) {
         }
     }
 
-    return new EmbedBuilder()
-        .setColor(gameOver ? (result === 'win' ? 0x00e5a8 : 0xff5577) : 0x00d4ff)
-        .setTitle(title)
-        .setDescription(description)
-        .setFooter({ text: `Game ID: ${gameId}` })
-        .setTimestamp();
+    /*
+     * Two looks, same board: high-tech players get a terminal panel, normal
+     * players the plain embed. The ASCII gallows fence is dropped for the
+     * panel because a ``` block inside ```ansi would close it early.
+     */
+    const plainLines = description.split('\n');
+    const techLines = plainLines.map(line => {
+        if (line.trim().startsWith('```')) return neonUI.toAnsi(line.replace(/```/g, ''));
+        return neonUI.toAnsi(line);
+    });
+
+    return neonUI.neonEmbed({
+        userId: game.userId,
+        title: 'HANGMAN',
+        normalTitle: title,
+        lines: techLines,
+        normalLines: plainLines,
+        color: gameOver ? (result === 'win' ? neonUI.NEON.green : neonUI.NEON.red) : neonUI.NEON.cyan,
+        footer: `Game ID: ${gameId}`
+    });
 }
 
-function createLeaderboardEmbed() {
+function createLeaderboardEmbed(userId) {
     const entries = [...hangmanLeaderboard.values()]
         .sort((a, b) => b.creditsEarned - a.creditsEarned)
         .slice(0, 10);
 
     if (entries.length === 0) {
-        return new EmbedBuilder().setColor(0x00d4ff).setTitle('🏆 Hangman Leaderboard')
-            .setDescription('No Hangman games have been completed yet.');
+        return neonUI.neonEmbed({
+            userId,
+            title: 'HANGMAN LEADERBOARD',
+            normalTitle: '🏆 Hangman Leaderboard',
+            lines: ['No Hangman games have been completed yet.'],
+            color: neonUI.NEON.cyan
+        });
     }
 
-    const lines = entries.map((entry, index) => {
+    const plainLines = [];
+    entries.forEach((entry, index) => {
         const totalGames = entry.wins + entry.losses + entry.quits + entry.timeouts;
         const winRate = totalGames > 0 ? ((entry.wins / totalGames) * 100).toFixed(1) : '0.0';
-        return `**${index + 1}.** <@${entry.userId}>\n` +
-            `🏆 ${entry.wins} wins • ❌ ${entry.losses} losses • 📊 ${winRate}% win rate\n` +
-            `💰 ${entry.creditsEarned} credits`;
+        plainLines.push(`**${index + 1}.** <@${entry.userId}>`);
+        plainLines.push(`🏆 ${entry.wins} wins • ❌ ${entry.losses} losses • 📊 ${winRate}% win rate`);
+        plainLines.push(`💰 ${entry.creditsEarned} credits`);
+        plainLines.push('');
     });
 
-    return new EmbedBuilder().setColor(0xF1C40F).setTitle('🏆 Hangman Leaderboard')
-        .setDescription(lines.join('\n\n')).setTimestamp();
+    return neonUI.neonEmbed({
+        userId,
+        title: 'HANGMAN LEADERBOARD',
+        normalTitle: '🏆 Hangman Leaderboard',
+        lines: plainLines.map(neonUI.toAnsi),
+        normalLines: plainLines,
+        color: neonUI.NEON.gold
+    });
 }
 
 function createWordGuessModal(gameId) {
@@ -469,7 +497,7 @@ async function startGame(interaction) {
             }
 
             if (componentInteraction.isButton() && componentInteraction.customId === `hm:${gameId}:LEADERBOARD`) {
-                await componentInteraction.reply({ embeds: [createLeaderboardEmbed()] });
+                await componentInteraction.reply({ embeds: [createLeaderboardEmbed(currentGame.userId)] });
                 return;
             }
 

@@ -69,19 +69,55 @@ function styleOf(userId, override) {
     return isHighTech(userId) ? 'hightech' : 'normal';
 }
 
-function neonEmbed({ title, lines, description, color = NEON.cyan, footer, timestamp = true, userId, plainStyle }) {
+/* Strip terminal colour codes, for the plain rendering of the same lines. */
+function stripAnsi(text) {
+    return String(text ?? '').replace(/\u001b\[[0-9;]*m/g, '');
+}
+
+/* Markdown bold → ANSI bold, so a line keeps its emphasis inside a panel. */
+function toAnsi(text) {
+    return String(text).replace(/\*\*(.+?)\*\*/g, `${BOLD}$1${RESET}`);
+}
+
+/* Split a multi-line body into panel-ready ANSI lines. */
+function panelLines(text) {
+    return String(text ?? '').split('\n').map(toAnsi);
+}
+
+/*
+ * One embed, two looks:
+ *   high-tech → `◢ ═══ TITLE ═══ ◣` + a ```ansi terminal panel
+ *   normal    → the plain title and the same lines as ordinary text
+ * Pass `normalTitle` / `normalLines` when the plain version should read
+ * differently (shorter headers, no terminal jargon) rather than just losing
+ * its colour codes.
+ */
+function neonEmbed({
+    title,
+    normalTitle,
+    lines,
+    normalLines,
+    description,
+    color = NEON.cyan,
+    footer,
+    timestamp = true,
+    userId,
+    plainStyle
+}) {
     const style = styleOf(userId, plainStyle);
+    const embed = new EmbedBuilder().setColor(color);
+
     if (style === 'normal') {
-        return new EmbedBuilder()
-            .setColor(color)
-            .setTitle(String(title).replace(/[\uE000-\uF8FF]/g, '').trim())
-            .setDescription(lines ? plainPanel(...lines) : (description || ''));
+        embed.setTitle(String(normalTitle || title).replace(/[\uE000-\uF8FF]/g, '').trim());
+        // Callers that pass ANSI-coloured `lines` still get readable plain text:
+        // escape codes are stripped instead of leaking into the embed.
+        const bodyLines = normalLines || (lines ? lines.map(stripAnsi) : null);
+        embed.setDescription(bodyLines ? plainPanel(...bodyLines) : (description || ''));
+    } else {
+        embed.setTitle(neonTitle(title));
+        embed.setDescription(lines ? panel(...lines) : description);
     }
-    const body = lines ? panel(...lines) : description;
-    const embed = new EmbedBuilder()
-        .setColor(color)
-        .setTitle(neonTitle(title))
-        .setDescription(body);
+
     if (footer) embed.setFooter({ text: footer });
     if (timestamp) embed.setTimestamp();
     return embed;
@@ -98,5 +134,8 @@ module.exports = {
     neonEmbed,
     progressBar,
     styleOf,
+    toAnsi,
+    stripAnsi,
+    panelLines,
     ANSI: { RESET, CYAN, GREEN, RED, YELLOW, MAGENTA, DIM, BOLD }
 };

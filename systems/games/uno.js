@@ -84,6 +84,35 @@ function advance(state, steps = 1) {
     state.turn = (((state.turn + state.direction * steps) % n) + n) % n;
 }
 
+/* The seat `steps` away in the current direction (1 = the next player). */
+function nextSeat(state, steps = 1) {
+    const n = state.players.length;
+    return state.players[(((state.turn + state.direction * steps) % n) + n) % n];
+}
+
+/* True when `player` can answer the pending draw instead of taking it. */
+function canAnswerPending(state, player = nextSeat(state)) {
+    return Boolean(player) && player.hand.some(card => canPlayCard(state, player.hand, card));
+}
+
+/*
+ * Hand the pending penalty to `player` and clear it. Used by drawCard (the
+ * victim pressed the button) and by the two-seat shortcut below, where the
+ * opponent is skipped and draws without getting a turn.
+ */
+function takePendingDraw(state, player) {
+    const amount = state.pendingDraw;
+    state.unoOpen = null;
+    for (let i = 0; i < amount; i++) {
+        const drawn = drawFromDeck(state);
+        if (drawn) player.hand.push(drawn);
+    }
+    if (player.hand.length !== 1) player.calledUno = false;
+    state.pendingDraw = 0;
+    state.pendingKind = null;
+    return amount;
+}
+
 function drawFromDeck(state) {
     if (!state.deck.length) {
         // Recycle every discarded card except the visible top card.
@@ -249,25 +278,39 @@ function playCard(state, playerId, cardId, chosenColor = null) {
     if (player.hand.length === 1 && !player.calledUno) state.unoOpen = player.id;
 
     const n = state.players.length;
+    const twoSeats = n === 2;
     switch (card.value) {
         case 'skip':
-            advance(state, 2);
+            // Two seats: the only opponent is skipped, so the player goes again.
+            if (!twoSeats) advance(state, 2);
             break;
         case 'reverse':
             state.direction *= -1;
-            // With two players, reverse behaves like skip.
-            advance(state, n === 2 ? 2 : 1);
+            // Two seats: reverse flips the order (a no-op with two players) and
+            // skips the opponent — the player keeps the turn either way.
+            if (!twoSeats) advance(state, 1);
             break;
         case 'draw2':
-            state.pendingDraw += 2;
-            state.pendingKind = 'draw2';
-            advance(state, 1);
+        case 'wild4': {
+            const amount = card.value === 'draw2' ? 2 : 4;
+            state.pendingDraw += amount;
+            state.pendingKind = card.value;
+            /*
+             * Two seats: the opponent cannot play anything but a stackable
+             * card, so when they have none they are skipped entirely — they
+             * take the cards and the player who threw the card goes again.
+             * When they CAN stack, the draw stays pending and they get their
+             * chance to answer (that is the whole point of stack/spicy).
+             */
+            if (twoSeats && !canAnswerPending(state)) {
+                const victim = nextSeat(state);
+                takePendingDraw(state, victim);
+                state.log.push(`${victim.name} was skipped and drew ${amount}.`);
+            } else {
+                advance(state, 1);
+            }
             break;
-        case 'wild4':
-            state.pendingDraw += 4;
-            state.pendingKind = 'wild4';
-            advance(state, 1);
-            break;
+        }
         default:
             advance(state, 1);
     }
@@ -279,15 +322,16 @@ function drawCard(state, playerId) {
     assertPlaying(state);
     const player = currentPlayer(state);
     if (player.id !== playerId) throw new Error("It's not your turn.");
-    const amount = state.pendingDraw > 0 ? state.pendingDraw : 1;
-    state.unoOpen = null;
-    for (let i = 0; i < amount; i++) {
+    let amount;
+    if (state.pendingDraw > 0) {
+        amount = takePendingDraw(state, player);
+    } else {
+        amount = 1;
+        state.unoOpen = null;
         const card = drawFromDeck(state);
         if (card) player.hand.push(card);
+        if (player.hand.length !== 1) player.calledUno = false;
     }
-    if (player.hand.length !== 1) player.calledUno = false;
-    state.pendingDraw = 0;
-    state.pendingKind = null;
     advance(state, 1);
     return { drew: amount };
 }
@@ -383,5 +427,7 @@ module.exports = {
     catchUno,
     chooseBotMove,
     currentPlayer,
+    nextSeat,
+    canAnswerPending,
     topCard
 };

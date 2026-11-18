@@ -13,10 +13,9 @@ module.exports = {
             lines: [
                 panel(
                     '```\n' +
-                    'ARCADE ONLINE — 7 MODULES\n' +
+                    'ARCADE ONLINE — 6 MODULES\n' +
                     '=========================\n' +
                     '🎡 roulette ......... /roulette amount:<#> bet_type:<color/area> number:<0-36> — instant spin\n' +
-                    '🔢 guess-number ..... free to play · 🪙500K to the exact hit\n' +
                     '💣 bomb ............. co-op defusal\n' +
                     '⚡ math ............. fastest brain wins\n' +
                     '🕵️ mafia ............ social deduction\n' +
@@ -25,7 +24,6 @@ module.exports = {
                     '```'
                 ),
                 '> 🎡 **Roulette** — `/roulette amount:<#> bet_type:red` or `number:17` — one command, one spin, instant result.',
-                '> 🔢 **Guess the Number** — type a number 1–1000 in the vault channel. ✅ wins the pot, ❌ burns your fee, 🔁 was taken.',
                 '> 💣 **Bomb Defusal** — `/activities action:bomb` · up to 5 engineers, 5 stages, 2 wrong wires and 💥.',
                 '> ⚡ **Math Duel** — `/activities action:math` · first correct click takes the pot.',
                 '> 🕵️ **Mafia: Neon Protocol** — `/activities action:mafia` · 5–10 players, night kills, day lynch votes, role DMs.',

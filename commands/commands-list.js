@@ -43,7 +43,6 @@ const COMMAND_CATEGORIES = {
             { name: '/scratchcard', desc: 'Buy and scratch cards for prizes' },
             { name: '/casino', desc: 'Casino rules + your summary (pick action)' },
             { name: '/roulette', desc: 'One-shot American roulette — /roulette amount:<#> bet_type:<color/area> or number:<0-36>' },
-            { name: '/guess-number', desc: '[ADMIN] Free to play — exact hit wins 🪙500,000' },
             { name: '/game-night', desc: 'Overview of every game-night module' },
             { name: '/activities', desc: 'QOTD + party games: bomb, math, mafia, spy (pick an activity)' },
         ]

@@ -108,8 +108,7 @@ module.exports = {
                 .addFields(
                     { name: '/games manage', value: 'Enable/disable games and configure shared tax.\n*Permissions: Manage Server / Mod Role*', inline: false },
                     { name: '/games rps', value: 'Challenge players to Rock Paper Scissors.\n*Example:* `/games rps challenge:Open wager:500 rounds:3`\n*Permissions: All members*', inline: false },
-                    { name: '/games coin-flip', value: 'Challenge players to a coin flip wager.\n*Example:* `/games coin-flip challenge:Specific wager:250 opponent:@Xonestly`\n*Permissions: All members*', inline: false },
-                    { name: '/games guess-number', value: 'Challenge players to guess a secret number (1-1,000).\n*Example:* `/games guess-number challenge:Open wager:500 rounds:3`\n*Permissions: All members*', inline: false }
+                    { name: '/games coin-flip', value: 'Challenge players to a coin flip wager.\n*Example:* `/games coin-flip challenge:Specific wager:250 opponent:@Xonestly`\n*Permissions: All members*', inline: false }
                 )
         ];
 

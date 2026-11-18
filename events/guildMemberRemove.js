@@ -51,24 +51,54 @@ function buildTracePanel({ kind, sessionLine, accountLine, nodesLeft }) {
     return ['```', ...rows, '```'].join('\n');
 }
 
-/*
- * Prefixes for the PLAIN cyber-punk text sent to the public departure
- * feed (no embed there — the fancy embed only goes to the mod log).
- */
-const FEED_PREFIX = {
-    leave: '📡 NODE LOST',
-    kick: '👢 ACCESS REVOKED',
-    ban: '⛔ NODE BLACKLISTED'
+const KINDS = {
+    leave: {
+        emoji: '📡', color: 0x00d4ff, title: 'CONNECTION TERMINATED // NODE LOST', tag: 'LEFT',
+        feedTitle: 'Member Left', feedVerb: 'left the server'
+    },
+    kick: {
+        emoji: '👢', color: 0xffa000, title: 'ACCESS REVOKED // MEMBER KICKED', tag: 'KICKED',
+        feedTitle: 'Member Kicked', feedVerb: 'was kicked from the server'
+    },
+    ban: {
+        emoji: '⛔', color: 0xed4245, title: 'NODE BLACKLISTED // MEMBER BANNED', tag: 'BANNED',
+        feedTitle: 'Member Banned', feedVerb: 'was banned from the server'
+    }
 };
 
-const KINDS = {
-    leave: { emoji: '📡', color: 0x00d4ff, title: 'CONNECTION TERMINATED // NODE LOST', tag: 'LEFT' },
-    kick: { emoji: '👢', color: 0xffa000, title: 'ACCESS REVOKED // MEMBER KICKED', tag: 'KICKED' },
-    ban: { emoji: '⛔', color: 0xed4245, title: 'NODE BLACKLISTED // MEMBER BANNED', tag: 'BANNED' }
-};
+/*
+ * Public departure feed — a clean, readable embed (no terminal panel, no
+ * code blocks): who left, how long they stayed, the live member count and,
+ * for removals, who did it and why.
+ */
+function buildFeedEmbed({ member, cfg, username, profileName, sessionLine, nodesLeft, entry }) {
+    const embed = new EmbedBuilder()
+        .setColor(cfg.color)
+        .setAuthor({
+            name: `${cfg.feedTitle} — ${profileName}`,
+            iconURL: member.user?.displayAvatarURL({ extension: 'png', size: 128 }) || undefined
+        })
+        .setDescription(`${cfg.emoji} **${profileName}** \u0060${username}\u0060 ${cfg.feedVerb}.`)
+        .addFields(
+            { name: '⏱️ Stayed', value: sessionLine, inline: true },
+            { name: '👥 Members now', value: nodesLeft, inline: true }
+        );
+
+    if (entry?.executor) {
+        embed.addFields({ name: '🛡️ Action by', value: `${entry.executor.tag}\n<@${entry.executor.id}>`, inline: true });
+    }
+    if (entry?.reason) {
+        embed.addFields({ name: '📄 Reason', value: String(entry.reason).slice(0, 1024), inline: false });
+    }
+
+    return embed
+        .setFooter({ text: `${member.guild.name} · departure feed` })
+        .setTimestamp();
+}
 
 module.exports = {
     name: Events.GuildMemberRemove,
+    buildFeedEmbed,
     async execute(member) {
         try {
             if (!member?.guild) return;
@@ -113,15 +143,12 @@ module.exports = {
             embed.setFooter({ text: `SLASH's YT Server · node telemetry · ${cfg.tag}` })
                 .setTimestamp();
 
-            // Plain cyber-punk line for the public departure feed.
-            const feedLine = [
-                `${FEED_PREFIX[kind]} :: <@${member.id}>`,
-                `\`${username}\` · session ${sessionLine} · ${nodesLeft} nodes online`,
-                entry?.reason ? `> reason: ${String(entry.reason).slice(0, 200)}` : null
-            ].filter(Boolean).join('\n');
+            // The public feed gets its own, cleaner embed: no code-block
+            // telemetry, just readable lines anyone can scan at a glance.
+            const feedEmbed = buildFeedEmbed({
+                member, cfg, username, profileName, sessionLine, nodesLeft, entry
+            });
 
-            // Fan out — the mod log gets the full telemetry embed, the
-            // public feed gets a simple one-line cyber-punk message.
             let delivered = 0;
             for (const channelId of DEPARTURE_CHANNEL_IDS) {
                 const channel = await getChannel(member.guild, channelId);
@@ -130,7 +157,7 @@ module.exports = {
                     continue;
                 }
                 const isFeed = channelId === '1504365034216624192';
-                const payload = isFeed ? { content: feedLine } : { embeds: [embed] };
+                const payload = { embeds: [isFeed ? feedEmbed : embed] };
                 await channel.send(payload)
                     .then(() => { delivered++; })
                     .catch(error => console.error(`Departure log failed for ${channelId}:`, error));

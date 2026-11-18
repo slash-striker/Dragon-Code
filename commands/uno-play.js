@@ -8,6 +8,8 @@ const {
     StringSelectMenuBuilder
 } = require('discord.js');
 const uno = require('../systems/games/uno');
+const neonUI = require('../systems/games/neonUI');
+const { isHighTech } = require('../systems/economy/uiStyleHelper');
 const { renderTable, cardLabel, COLOR_EMOJI } = require('../systems/games/unoRender');
 
 const UNO_CHANNEL_ID = '1560441728664731709';
@@ -36,20 +38,33 @@ function newBot(botNumber) {
 }
 
 function lobbyPayload(game) {
-    const seats = game.lobby.map((player, index) =>
-        `${index + 1}. ${player.isBot ? '🤖' : '🧑'} ${player.name}${player.id === game.hostId ? ' 👑' : ''}`);
-    const embed = new EmbedBuilder()
-        .setColor(EMBED_COLORS.yellow)
-        .setTitle('🃏 UNO LOBBY')
-        .setDescription([
-            `Host: <@${game.hostId}> · Mode: **${game.mode === 'bot' ? 'Vs bot' : `${game.maxPlayers} players`}** · Rules: **${uno.describeRules(game.rulesMode)}**`,
-            `Seats: **${game.lobby.length}/${game.maxPlayers}** — the table starts when it fills, or when the host presses Start (2+ players).`,
-            '',
-            seats.join('\n') || '_No players yet_'
-        ].join('\n'))
-        .setFooter({ text: 'Lobby closes after 10 minutes without a start' })
-        .setTimestamp();
     const full = game.lobby.length >= game.maxPlayers;
+    // Embeds don't resolve mentions inside the ```ansi``` panel the high-tech
+    // look uses, so the host is shown by name rather than as <@id>.
+    const host = game.lobby.find(player => player.id === game.hostId);
+    const seats = game.lobby.map((player, index) =>
+        `\`${index + 1}\` ${player.isBot ? '🤖' : '🧑'} **${player.name}**${player.id === game.hostId ? ' 👑' : ''}`);
+    // Seats first — the lobby IS the roster, so it belongs at the top.
+    const lines = [
+        `**🪑 Seats ${game.lobby.length}/${game.maxPlayers}** — ${full
+            ? 'full, dealing now…'
+            : 'the table starts when it fills, or when the host presses **Start** (2+ players).'}`,
+        seats.join('\n') || '_No players yet_',
+        '━━━━━━━━━━━━━━━━━━━━━━━',
+        `**🎮 Mode:** ${game.mode === 'bot' ? 'Versus bot' : `${game.maxPlayers} players`}  ·  **📜 Rules:** ${uno.describeRules(game.rulesMode)}`,
+        `**👑 Host:** ${host ? host.name : 'unknown'}`,
+        '_Lobby closes after 10 minutes without a start._'
+    ];
+    // Tables are shared, so the host's /ui-style decides the look for everyone.
+    const embed = neonUI.neonEmbed({
+        userId: game.hostId,
+        title: 'UNO LOBBY',
+        normalTitle: '🃏 UNO Lobby',
+        lines: lines.map(neonUI.toAnsi),
+        normalLines: lines,
+        color: EMBED_COLORS.yellow,
+        footer: 'Lobby closes after 10 minutes without a start'
+    });
     const row = new ActionRowBuilder().addComponents(
         button(`uno:join:${game.id}`, 'Join', ButtonStyle.Success, full),
         button(`uno:leave:${game.id}`, 'Leave', ButtonStyle.Secondary),
@@ -74,47 +89,81 @@ function tableRows(game) {
     ];
 }
 
-function standingsLines(engine) {
-    return engine.players.map(player => {
+/*
+ * One line per seat. `markers` adds the table-view dressing: the seat number
+ * and a ▶ next to whoever is on turn. The finish panel uses the plain form.
+ */
+function standingsLines(engine, { markers = false } = {}) {
+    const activeId = engine.status === 'playing' ? uno.currentPlayer(engine).id : null;
+    return engine.players.map((player, index) => {
         const cards = `${player.hand.length} card${player.hand.length === 1 ? '' : 's'}`;
-        const unoTag = player.hand.length === 1 ? (player.calledUno ? ' · UNO ✅' : ' · ⚠️ no UNO') : '';
-        return `${player.isBot ? '🤖' : '🧑'} **${player.name}** — ${cards} · ${player.score} pts${unoTag}`;
+        const unoTag = player.hand.length === 1 ? (player.calledUno ? ' · ✅ UNO' : ' · ⚠️ no UNO') : '';
+        const marker = markers ? `${player.id === activeId ? '▶' : '▫️'} \`${index + 1}\` ` : '';
+        return `${marker}${player.isBot ? '🤖' : '🧑'} **${player.name}** — ${cards} · ${player.score} pts${unoTag}`;
     }).join('\n');
+}
+
+/*
+ * Rendering the 900×580 table costs ~10ms, so remember the PNG for the exact
+ * state it was drawn from. Every visual input (turn, colour, pending draw,
+ * each hand's size and UNO flag, the last log line) is in the key — the only
+ * repeated renders that get skipped are the ones that would be pixel-identical
+ * anyway (e.g. a UNO call leaves the table unchanged).
+ */
+function tableImage(game) {
+    const engine = game.engine;
+    const key = [
+        engine.round, engine.turn, engine.direction, engine.color, engine.pendingDraw,
+        engine.pendingKind, engine.status, engine.deck.length, engine.discard.length,
+        engine.log.length,
+        engine.players.map(p => `${p.hand.length}${p.calledUno ? '!' : ''}`).join(',')
+    ].join('|');
+    if (game.tableCache?.key === key) return game.tableCache.png;
+    const png = renderTable(engine, { turnPlayerId: uno.currentPlayer(engine)?.id ?? null });
+    game.tableCache = { key, png };
+    return png;
 }
 
 async function gamePayload(game, note = '') {
     const engine = game.engine;
     const current = uno.currentPlayer(engine);
     const top = uno.topCard(engine);
-    const png = renderTable(engine, { turnPlayerId: current?.id });
-    const attachment = new AttachmentBuilder(png, { name: 'uno-table.png' });
+    const attachment = new AttachmentBuilder(tableImage(game), { name: 'uno-table.png' });
     // Discord relative timestamp: a live countdown the player can watch.
     const deadline = game.turnDeadline && !current.isBot
         ? `<t:${Math.floor(game.turnDeadline / 1000)}:R>`
         : null;
     const turnLine = engine.status === 'playing'
-        ? `Turn: **${current.name}**${current.isBot ? ' (thinking…)' : ` — <@${current.id}>, ${deadline ?? `${Math.round(TURN_MS / 1000)}s`} left`}`
-        : `Round over — next round starts shortly.`;
-    // Plain content + full-size attachment, deliberately NOT an embed: embeds
-    // shrink the table image, while an attached image renders near full width.
-    const content = [
-        `**🃏 UNO · Round ${engine.round}**`,
-        turnLine,
-        `Top card: **${cardLabel(top)}** ${COLOR_EMOJI[top.color] ?? ''} · Colour: **${(engine.color ?? '').toUpperCase()}**`,
-        engine.pendingDraw > 0 ? (engine.rulesMode === 'normal'
+        ? (current.isBot
+            ? `🤖 **${current.name}** is thinking…`
+            : `🎯 **${current.name}** — <@${current.id}>, ${deadline ?? `${Math.round(TURN_MS / 1000)}s`} to play`)
+        : '🏁 Round over — next round starts shortly.';
+    const pendingLine = engine.pendingDraw > 0
+        ? (engine.rulesMode === 'normal'
             ? `⚠️ **+${engine.pendingDraw}** pending — draw it (no stacking in Normal).`
             : engine.rulesMode === 'spicy'
-                ? `⚠️ **+${engine.pendingDraw}** pending — stack any +2/+4 or draw.`
-                : `⚠️ **+${engine.pendingDraw}** pending — stack a matching +2/+4 or draw.`) : '',
-        note && !game.actionHistory?.includes(note) ? `\n${note}` : '',
-        game.actionHistory?.length
-            ? `\n**Recent plays**\n${game.actionHistory.slice(-4).map(action => `• ${action}`).join('\n')}`
-            : '',
-        '',
-        standingsLines(engine),
-        '',
-        `_First to ${engine.targetScore} points wins · ${uno.describeRules(engine.rulesMode)} · Open "My Hand" to play privately`
-    ].filter(line => line !== '').join('\n');
+                ? `⚠️ **+${engine.pendingDraw}** pending — stack any +2/+4, or draw.`
+                : `⚠️ **+${engine.pendingDraw}** pending — stack a matching +2/+4, or draw.`)
+        : null;
+    const historyBlock = game.actionHistory?.length
+        ? `**🗒️ Recent plays**\n${game.actionHistory.slice(-4).map(action => `• ${action}`).join('\n')}`
+        : null;
+    // Plain content + full-size attachment, deliberately NOT an embed: embeds
+    // shrink the table image, while an attached image renders near full width.
+    // Layout: seats at the top, board state in the middle, history at the very
+    // bottom — the same order you read a real table in.
+    const content = [
+        `**🃏 UNO · Round ${engine.round}**  ·  first to **${engine.targetScore}** pts`,
+        turnLine,
+        `**🪑 Table**\n${standingsLines(engine, { markers: true })}`,
+        '━━━━━━━━━━━━━━━━━━━━━━━',
+        `**🎴 Top card:** ${cardLabel(top)} ${COLOR_EMOJI[top.color] ?? ''}  ·  **Colour:** ${COLOR_EMOJI[engine.color] ?? '⬛'} ${(engine.color ?? '').toUpperCase()}\n` +
+            `**🧭 Order:** ${engine.direction === 1 ? '↻ Clockwise' : '↺ Counter-clockwise'}  ·  **🎲 Deck:** ${engine.deck.length}`,
+        pendingLine,
+        note && !game.actionHistory?.includes(note) ? note : null,
+        `_${uno.describeRules(engine.rulesMode)} · open **🂠 My Hand** to play privately_`,
+        historyBlock
+    ].filter(Boolean).join('\n\n');
     return { content, components: tableRows(game), files: [attachment], attachments: [] };
 }
 
@@ -141,16 +190,20 @@ function finishGame(game, note) {
     games.delete(game.id);
     const engine = game.engine;
     const winner = engine?.winnerId ? engine.players.find(p => p.id === engine.winnerId) : null;
-    const embed = new EmbedBuilder()
-        .setColor(EMBED_COLORS.green)
-        .setTitle('🏆 UNO · TABLE CLOSED')
-        .setDescription([
-            winner ? `🥇 **${winner.name}** wins the table!` : 'The table was closed before anyone reached the target.',
-            note,
-            '',
-            engine ? standingsLines(engine) : ''
-        ].filter(Boolean).join('\n'))
-        .setTimestamp();
+    const lines = [
+        winner ? `🥇 **${winner.name}** wins the table!` : 'The table was closed before anyone reached the target.',
+        note,
+        '',
+        engine ? standingsLines(engine) : ''
+    ].filter(Boolean);
+    const embed = neonUI.neonEmbed({
+        userId: game.hostId,
+        title: 'UNO · TABLE CLOSED',
+        normalTitle: '🏆 UNO — Table Closed',
+        lines: lines.map(neonUI.toAnsi),
+        normalLines: lines,
+        color: EMBED_COLORS.green
+    });
     return game.message?.edit({ embeds: [embed], components: [], files: [], attachments: [] })
         .catch(error => console.error('UNO finish failed:', error.message));
 }
@@ -162,10 +215,15 @@ function closeLobby(game, text) {
     clearTimer(game);
     channelGames.delete(game.channelId);
     games.delete(game.id);
-    const embed = new EmbedBuilder()
-        .setColor(0x555577)
-        .setTitle('🃏 UNO LOBBY CLOSED')
-        .setDescription(text);
+    const embed = neonUI.neonEmbed({
+        userId: game.hostId,
+        title: 'UNO LOBBY CLOSED',
+        normalTitle: '🃏 UNO Lobby Closed',
+        lines: neonUI.panelLines(text),
+        normalLines: String(text ?? '').split('\n'),
+        color: 0x555577,
+        timestamp: false
+    });
     return game.message?.edit({ embeds: [embed], components: [], attachments: [] })
         .catch(error => console.error('UNO lobby close failed:', error.message));
 }

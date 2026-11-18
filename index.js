@@ -266,10 +266,6 @@ client.once(Events.ClientReady, async () => {
         console.error('Casino boot sweep failed:', error);
     }
 
-    // Game Night suite: guess-the-number round (roulette is now an on-demand
-    // /roulette command — no channel loop).
-    require('./commands/guess-number').bootstrap(client);
-
     await deployCommands();
     const statusMap = {
         online: PresenceUpdateStatus.Online,
@@ -435,10 +431,7 @@ client.on(Events.MessageCreate, async message => {
        GAME NIGHT ROUTING
     ========================= */
     try {
-        // 1. Guess the Number: numeric messages in the vault channel.
-        await require('./commands/guess-number').handleMessage(message);
-
-        // 2. Mafia / Spy threads: night actions and interrogation commands.
+        // Mafia / Spy threads: night actions and interrogation commands.
         if (message.channel?.isThread?.()) {
             const mafiaHandled = await require('./commands/mafia').handleThreadMessage(message);
             if (!mafiaHandled) await require('./commands/spy').handleThreadMessage(message);
@@ -501,16 +494,21 @@ client.on(Events.InteractionCreate, async interaction => {
         // Legacy modal hook — the unified /job command uses a select menu.
         handler = client.commands.get('job')?.handleModal;
     } else if (interaction.isModalSubmit() && interaction.customId === 'sleep:schedule') {
-        // Handle sleep schedule modal
+        // Handle sleep schedule modal. The shared parser accepts 24-hour
+        // ("23:00", and "24:00" as midnight), 12-hour ("11 pm") and bare-hour
+        // ("7") input, then stores one canonical "HH:MM".
         const userId = interaction.user.id;
-        const wakeTime = interaction.fields.getTextInputValue('wakeTime');
-        const sleepTime = interaction.fields.getTextInputValue('sleepTime');
-        
-        const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
-        
-        if (!timeRegex.test(wakeTime) || !timeRegex.test(sleepTime)) {
+        const { normalizeTimeInput, parseTimeInput, formatBoth } = require('./systems/util/timeFormat');
+        const rawWake = interaction.fields.getTextInputValue('wakeTime');
+        const rawSleep = interaction.fields.getTextInputValue('sleepTime');
+        const wakeTime = normalizeTimeInput(rawWake);
+        const sleepTime = normalizeTimeInput(rawSleep);
+
+        if (!wakeTime || !sleepTime) {
+            const bad = !wakeTime ? 'wake' : 'sleep';
             return interaction.reply({
-                content: 'Invalid time format. Please use HH:MM format (e.g., 07:00). Try again with /set-sleep.',
+                content: `❌ I could not read the ${bad} time.\nUse **24-hour** (\`07:00\`, \`23:00\`, \`24:00\` for midnight) ` +
+                    'or **12-hour** (\`7:00am\`, \`11 pm\`). Try again with /set-sleep.',
                 ephemeral: true
             });
         }
@@ -532,7 +530,11 @@ client.on(Events.InteractionCreate, async interaction => {
         delete interaction.client.tempSleepData[userId];
         
         return interaction.reply({
-            content: `✅ **Sleep schedule saved!**\n\nTimezone: UTC${timezone >= 0 ? '+' : ''}${timezone}\nWake up: ${wakeTime}\nBedtime: ${sleepTime}\n\nYou can view other users' schedules with /see-users-time.`,
+            content: `✅ **Sleep schedule saved!**\n\n` +
+                `Timezone: UTC${Number(timezone) >= 0 ? '+' : ''}${timezone}\n` +
+                `Wake up: **${formatBoth(parseTimeInput(wakeTime))}**\n` +
+                `Bedtime: **${formatBoth(parseTimeInput(sleepTime))}**\n\n` +
+                'You can view other users\' schedules with /see-users-time.',
             ephemeral: true
         });
     } else if (interaction.isButton() && interaction.customId.startsWith('job-list:')) {
@@ -712,10 +714,13 @@ client.on(Events.InteractionCreate, async interaction => {
         'ec-cooldowns', 'open-box', 'item-give'
         , 'mining'
         , 'nextcount', 'count-leaderboard'
-        , 'roulette', 'guess-number', 'bomb', 'math', 'mafia', 'spy', 'activities', 'game-night'
+        , 'roulette', 'bomb', 'math', 'mafia', 'spy', 'activities', 'game-night'
         , 'games'
         ,        'birthday'
         , 'mining-inventory', 'uno-play'
+        // /bounty is a player-facing command — its boards and pools move every
+        // day, so it must never fill the admin log channel.
+        , 'bounty'
 
     ];
 

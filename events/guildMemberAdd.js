@@ -69,11 +69,60 @@ const WELCOME_MESSAGES = [
 let createCanvas;
 let loadImage;
 
+/*
+ * Discord API calls in this handler talk to discord.com over the network, and
+ * a host with flaky DNS fails them with EAI_AGAIN (plus the usual
+ * ENOTFOUND / ETIMEDOUT / socket resets). One failed lookup used to abort the
+ * whole welcome flow, so every call is retried briefly and, when it still
+ * fails, that STEP is skipped instead of the rest of the greeting.
+ */
+const NETWORK_ERROR_CODES = new Set([
+    'EAI_AGAIN', 'ENOTFOUND', 'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED',
+    'ENETUNREACH', 'EPIPE', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET'
+]);
+
+function isTransientNetworkError(error) {
+    const code = error?.code || error?.cause?.code;
+    if (code && NETWORK_ERROR_CODES.has(code)) return true;
+    return /EAI_AGAIN|ENOTFOUND|ECONNRESET|socket hang up|getaddrinfo/i.test(String(error?.message || ''));
+}
+
+async function withRetry(action, attempts = 3) {
+    let lastError = null;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        try {
+            return await action();
+        } catch (error) {
+            lastError = error;
+            if (attempt === attempts - 1 || !isTransientNetworkError(error)) break;
+            await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+        }
+    }
+    throw lastError;
+}
+
+/*
+ * Download an image ourselves (with retries) and hand @napi-rs/canvas a
+ * Buffer. Returning a URL string made the canvas library do its own lookup, so
+ * one EAI_AGAIN there took the card down with it.
+ */
+async function fetchImageBuffer(url) {
+    if (!url) return null;
+    try {
+        return await withRetry(async () => {
+            const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+            if (!response.ok) throw new Error(`HTTP ${response.status} fetching avatar`);
+            return Buffer.from(await response.arrayBuffer());
+        });
+    } catch {
+        return null;
+    }
+}
+
 function normalizeAvatarSource(source) {
+    // A Buffer needs no round trip through the filesystem — loadImage reads it.
     if (Buffer.isBuffer(source) || source instanceof Uint8Array) {
-        const tempPath = path.join(os.tmpdir(), `avatar-${Date.now()}-${Math.random().toString(16).slice(2)}.png`);
-        fs.writeFileSync(tempPath, Buffer.from(source));
-        return tempPath;
+        return Buffer.from(source);
     }
 
     if (typeof source === 'string' && source.startsWith('data:image/')) {
@@ -89,6 +138,7 @@ function normalizeAvatarSource(source) {
 }
 
 async function safeLoadAvatar(source, label = 'A') {
+    if (!source) return null;
     const avatarSource = normalizeAvatarSource(source);
 
     try {
@@ -197,18 +247,36 @@ async function createWelcomeCard(member) {
         ctx.stroke();
     }
 
-    const avatarSource = member.user?.displayAvatarURL?.({ extension: 'png', size: 512 }) ?? null;
-    const avatar = await safeLoadAvatar(avatarSource, member?.user?.username || 'A');
+    const avatarUrl = member.user?.displayAvatarURL?.({ extension: 'png', size: 512 }) ?? null;
+    const avatarBuffer = await fetchImageBuffer(avatarUrl);
+    const avatar = avatarBuffer
+        ? await safeLoadAvatar(avatarBuffer, member?.user?.username || 'A')
+        : null;
     const cx = canvas.width / 2;
     const cy = 200;
     const radius = 100;
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.drawImage(avatar, cx - radius, cy - radius, radius * 2, radius * 2);
-    ctx.restore();
+    if (avatar) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(avatar, cx - radius, cy - radius, radius * 2, radius * 2);
+        ctx.restore();
+    } else {
+        // Avatar unreachable — still draw a readable placeholder ring.
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+        ctx.fill();
+        ctx.fillStyle = '#f8fafc';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 110px sans-serif';
+        ctx.fillText(String(member?.user?.username || 'A').slice(0, 1).toUpperCase(), cx, cy + 6);
+        ctx.restore();
+    }
 
     for (const [offsetX, color] of [[0, '#ff0000'], [2, 'rgba(0,255,255,0.4)'], [-2, 'rgba(255,0,255,0.4)']]) {
         ctx.beginPath();
@@ -264,7 +332,7 @@ module.exports = {
             try { require('../systems/discord/liveCounters').scheduleRefresh(member.client); } catch {}
 
             try {
-                await member.roles.add(UNVERIFIED_ROLE_ID);
+                await withRetry(() => member.roles.add(UNVERIFIED_ROLE_ID));
             } catch (error) {
                 console.error(`Unable to assign unverified role to new member ${member.id}: ${error.message}`);
             }
@@ -282,7 +350,7 @@ module.exports = {
              * (rate limits, deleted DM, etc.).
              */
             const sendDmWelcome = async () => {
-                const dm = await member.createDM();
+                const dm = await withRetry(() => member.createDM());
                 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
                 const width = 20;
                 const bar = percent => {
@@ -340,7 +408,7 @@ module.exports = {
                     )]
                 });
 
-                const message = await dm.send({ content: stages[0].build() });
+                const message = await withRetry(() => dm.send({ content: stages[0].build() }));
                 try {
                     for (const stage of stages.slice(1)) {
                         await sleep(stage.delay);
@@ -379,20 +447,27 @@ module.exports = {
                 return;
             }
 
-            const cardBuffer = await createWelcomeCard(member);
-            if (cardBuffer) {
-                const sent = await cardChannel.send({
-                    content: `⚡ Welcome **${profileName}** to **${serverName}**!`,
-                    files: [{ attachment: cardBuffer, name: 'welcome.png' }]
-                });
-                for (const emoji of ['👋', '👍', '🔥', '🎉']) {
-                    await sent.react(emoji);
+            const cardBuffer = await createWelcomeCard(member).catch(error => {
+                console.warn('Welcome card render failed:', error.message);
+                return null;
+            });
+            try {
+                if (cardBuffer) {
+                    const sent = await withRetry(() => cardChannel.send({
+                        content: `⚡ Welcome **${profileName}** to **${serverName}**!`,
+                        files: [{ attachment: cardBuffer, name: 'welcome.png' }]
+                    }));
+                    for (const emoji of ['👋', '👍', '🔥', '🎉']) {
+                        await sent.react(emoji).catch(() => {});
+                    }
+                } else {
+                    await withRetry(() => cardChannel.send({
+                        content: `⚡ Welcome **${profileName}** to **${serverName}**!`
+                    }));
                 }
-
-            } else {
-                await cardChannel.send({
-                    content: `⚡ Welcome **${profileName}** to **${serverName}**!`
-                });
+            } catch (error) {
+                // A dead DNS/socket must not swallow the rest of the greeting.
+                console.warn(`Welcome card could not be posted to ${WELCOME_CARD_CHANNEL_ID}: ${error.message}`);
             }
 
             const selectedMessage = WELCOME_MESSAGES[Math.floor(Math.random() * WELCOME_MESSAGES.length)]
@@ -406,10 +481,17 @@ module.exports = {
                     console.warn(`Welcome message skipped: channel ${channelId} was not found.`);
                     continue;
                 }
-                await channel.send(welcomeMessage);
+                try {
+                    await withRetry(() => channel.send(welcomeMessage));
+                } catch (error) {
+                    console.warn(`Welcome message could not be posted to ${channelId}: ${error.message}`);
+                }
             }
         } catch (error) {
-            console.error('Welcome card error:', error);
+            // Transient DNS/socket failures are expected on a flaky host and are
+            // already retried above — log them as warnings, not as a crash.
+            const log = isTransientNetworkError(error) ? console.warn : console.error;
+            log('Welcome card error:', error);
         }
     }
 };
