@@ -252,6 +252,12 @@ client.once(Events.ClientReady, async () => {
     // Goal) — slow refresh ticker; joins/leaves schedule a debounced refresh.
     require('./systems/discord/liveCounters').startLiveCounters(client);
 
+    // Netquel leaderboard tracker: the site's daily/weekly/all-time tables
+    // refresh every NETQUEL_SITE_REFRESH_MINUTES (default 2) and the in-game
+    // per-server sweep every NETQUEL_REFRESH_MINUTES (default 10), both in a
+    // headless browser, pinging the Owner role when a tracked enemy appears.
+    require('./systems/netquel/netquelService').startNetquelTracker(client);
+
     // Casino self-heal: any blackjack session left 'active' by a restart or
     // crash would permanently block that player from opening a new table
     // ("You already have an active Blackjack table"). Close them on boot.
@@ -721,6 +727,9 @@ client.on(Events.InteractionCreate, async interaction => {
         // /bounty is a player-facing command — its boards and pools move every
         // day, so it must never fill the admin log channel.
         , 'bounty'
+        // Netquel staff tooling: these are used on a schedule while watching
+        // boards, and logging them drowns the audit channel.
+        , 'reload', 'netquel-leaderboard', 'target', 'add-enemy'
 
     ];
 
