@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test --test-concurrency=1",
-    "start": "node index.js"
+    "start": "node index.js",
+    "netquel:install-chrome": "node scripts/install-netquel-chrome.js",
+    "postinstall": "node scripts/install-netquel-chrome.js"
   },
   "keywords": [],
   "author": "",

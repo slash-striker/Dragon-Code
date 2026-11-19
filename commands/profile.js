@@ -92,61 +92,58 @@ function buildMain(ownerId, displayName) {
 
     const active = summary.active;
     const species = active ? hatchery.SPECIES[active.speciesId] : null;
+    /*
+     * Compact card: one line per fact, no section headings. The old version
+     * spent four lines on "ACTIVE PET" / "PASSIVE BONUSES" headings and four
+     * more on labelled counters that fit on one line each.
+     */
     const dragonBlock = active
         ? [
             `${species?.emoji || '🐉'} **${active.name}** — Lv **${progressOf(active).level}** ${style(active.rarity).emoji} ${style(active.rarity).label}`,
             `> ${traitLine(active)}`,
-            `> ❤️ Hunger ${bar(active.hunger)} ${active.hunger}% · 😊 Mood ${bar(active.happiness)} ${active.happiness}%`,
-            `> ⚔️ ${active.power} · 💨 ${active.speed} · 🛡️ ${active.stamina} · 🔗 Bond ${active.bond}`
+            `> ❤️ ${bar(active.hunger)} ${active.hunger}% · 😊 ${bar(active.happiness)} ${active.happiness}%`,
+            `> ⚔️ ${active.power} · 💨 ${active.speed} · 🛡️ ${active.stamina} · 🔗 ${active.bond}`
         ].join('\n')
         : '_No active pet yet — incubate an egg to get started._';
 
-    const bonusLines = hatchery.describeDragonBonus(ownerId).join('\n');
+    const bonusLine = hatchery.describeDragonBonus(ownerId).join(' · ');
+    const badges = questStats.badgesEarned || quests.getBadges(ownerId).length;
 
     const embed = new EmbedBuilder()
         .setColor(active?.side === 'evil' ? 0xff2d6f : COLOR)
         .setTitle(`🪪 ${displayName}`)
         .setDescription([
-            equipped ? `**${titles.formatTitleTag(ownerId)}**` : '_No title equipped — check the Titles panel._',
-            '',
-            '**🐉 ACTIVE PET**',
+            equipped ? `**${titles.formatTitleTag(ownerId)}**` : '_No title equipped_',
             dragonBlock,
-            '',
-            '**✨ PASSIVE BONUSES**',
-            bonusLines
-        ].join('\n'))
+            bonusLine ? `✨ ${bonusLine}` : null
+        ].filter(Boolean).join('\n'))
         .addFields(
             {
                 name: '📦 Hatchery',
                 value: [
-                    `🥚 Eggs held: **${summary.counts.eggsIdle + summary.counts.incubating}**`,
-                    `🌡️ Incubating: **${summary.counts.incubating}**${summary.counts.ready ? ` (✅ **${summary.counts.ready} ready**)` : ''}`,
-                    `🐉 Pets: **${stats.dragons}** · best Lv **${stats.bestLevel}**`,
-                    `🎓 Hatched lifetime: **${stats.hatched}**`
+                    `🥚 **${summary.counts.eggsIdle + summary.counts.incubating}** held · 🌡️ **${summary.counts.incubating}** incubating${summary.counts.ready ? ` · ✅ **${summary.counts.ready}** ready` : ''}`,
+                    `🐉 **${stats.dragons}** pets · best Lv **${stats.bestLevel}** · 🎓 **${stats.hatched}** hatched`
                 ].join('\n'),
                 inline: true
             },
             {
                 name: '🎯 Progress',
                 value: [
-                    `📋 Quests claimed: **${questStats.questsClaimed}**`,
-                    `🔥 Daily quest streak: **${questStats.dailyStreak}**`,
-                    `🏅 Badges: **${questStats.badgesEarned || quests.getBadges(ownerId).length}**`,
-                    bounty > 0 ? `🎯 Bounty on you: **🪙${bounty.toLocaleString()}**` : '🎯 No bounty on you'
+                    `📋 **${questStats.questsClaimed}** quests · 🔥 **${questStats.dailyStreak}** streak`,
+                    `🏅 **${badges}** badges${bounty > 0 ? ` · 🎯 **🪙${bounty.toLocaleString()}**` : ''}`
                 ].join('\n'),
                 inline: true
             },
             {
                 name: '💰 Accounts',
                 value: [
-                    `💳 Wallet: 🪙${Number(balances.wallet).toLocaleString()}`,
-                    `🏦 Bank: 🪙${Number(balances.bank).toLocaleString()}`,
-                    `⛏️ Mining bank: 🪙${Number(balances.mining_bank).toLocaleString()}`
+                    `💳 🪙${Number(balances.wallet).toLocaleString()} · 🏦 🪙${Number(balances.bank).toLocaleString()}`,
+                    `⛏️ 🪙${Number(balances.mining_bank).toLocaleString()}`
                 ].join('\n'),
                 inline: true
             },
             {
-                name: '⚔️ Dragonflight vs Onslaught',
+                name: '⚔️ Rivalry',
                 value: `🌌 **Dragonflight** ${standings.good} · 🩸 **Onslaught** ${standings.evil} — season **${standings.season}**`,
                 inline: false
             }
@@ -1224,6 +1221,11 @@ async function runHatchSequence(interaction, ownerId, displayName, eggId) {
 
     const dragon = result.dragon;
     const species = result.species;
+    /*
+     * The reveal must describe the DRAGON, not the egg: a Knightfury egg can
+     * hatch a Storm Herald, and the old copy printed the egg's rarity over it.
+     */
+    const speciesStyle = style(species.rarity);
     const progress = progressOf(dragon);
     const first = hatchery.TRAITS[dragon.trait];
     const second = dragon.trait2 ? hatchery.TRAITS[dragon.trait2] : null;
@@ -1252,13 +1254,13 @@ async function runHatchSequence(interaction, ownerId, displayName, eggId) {
         : '';
 
     const embed = new EmbedBuilder()
-        .setColor(species.side === 'evil' ? 0xff2d6f : rarityStyle.color)
+        .setColor(species.side === 'evil' ? 0xff2d6f : speciesStyle.color)
         .setTitle(`✨ ${String(species.name).toUpperCase()} HAS HATCHED`)
         .setDescription([
             `**${dragon.name}** broke out of the ${type?.name || 'egg'}.`,
             '',
             `**Side:** ${species.side === 'evil' ? '🩸 Onslaught beast' : '🌌 Dragonflight dragon'}`,
-            `**Rarity:** ${rarityStyle.emoji} ${rarityStyle.label}`,
+            `**Rarity:** ${speciesStyle.emoji} ${speciesStyle.label}`,
             `**Traits:** ${[first, second].filter(Boolean).map(trait => `${trait.emoji} ${trait.name}`).join(' · ') || 'none'}`,
             `**Stats:** ⚔️ ${dragon.power} · 💨 ${dragon.speed} · 🛡️ ${dragon.stamina}`,
             `**Passive:** ${[first, second].filter(Boolean).map(trait => {

@@ -27,7 +27,10 @@
  */
 
 const { EmbedBuilder } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
 const source = require('./netquelSource');
+const { ensureChrome } = require('../../scripts/install-netquel-chrome');
 const store = require('./netquelStore');
 const {
     PERIODS,
@@ -89,6 +92,47 @@ let clientRef = null;
  * sweep's wall approach misses hops.
  */
 let browserQueue = Promise.resolve();
+let browserInstall = null;
+let disabledReason = null;
+
+/*
+ * Hosts without a console can still read what happened: every boot line and
+ * scrape failure is appended here as well as printed.
+ */
+const LOG_PATH = path.join(__dirname, '..', '..', 'netquel-tracker.log');
+const LOG_LIMIT_BYTES = 512 * 1024;
+
+function record(message, level = 'log') {
+    (console[level] || console.log)(message);
+    try {
+        if (fs.existsSync(LOG_PATH) && fs.statSync(LOG_PATH).size > LOG_LIMIT_BYTES) {
+            fs.writeFileSync(LOG_PATH, '');
+        }
+        fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ${message}\n`);
+    } catch {
+        // A read-only or full disk must never take the bot down.
+    }
+}
+
+/*
+ * A missing or unusable browser will not fix itself between two ticks, so the
+ * tracker stops after the first one instead of failing every two minutes.
+ */
+const FATAL_BROWSER_ERROR = /no chrome, edge or chromium|browser exited during startup|never exposed a debugging target|could not be started|shared librar|cannot open shared object/i;
+
+function noteFatalBrowserError(error) {
+    const message = String(error?.message ?? '');
+    if (!FATAL_BROWSER_ERROR.test(message)) return false;
+    stopNetquelTracker();
+    disabledReason = message;
+    record(
+        '🛰️ Netquel tracker stopped — the browser could not start.\n'
+        + `   ${message}\n`
+        + `   Fix it and restart (NETQUEL-HOSTING.md); diagnostics in ${LOG_PATH}.`,
+        'warn'
+    );
+    return true;
+}
 
 function isNetquelStaff(interaction) {
     if (interaction.user?.id === BOT_OWNER_ID) return true;
@@ -397,7 +441,8 @@ function refreshSite() {
             return { ok: true, snapshot, alerts, published };
         } catch (error) {
             if (snapshot) snapshot.error = error.message;
-            console.warn('Netquel site board refresh failed:', error.message);
+            record(`Netquel site board refresh failed: ${error.message}`, 'warn');
+            noteFatalBrowserError(error);
             return { ok: false, error };
         }
     }).finally(() => { siteInFlight = null; });
@@ -448,7 +493,8 @@ function refreshServers() {
             return { ok: true, snapshot, alerts, published };
         } catch (error) {
             if (snapshot) snapshot.error = error.message;
-            console.warn('Netquel server board refresh failed:', error.message);
+            record(`Netquel server board refresh failed: ${error.message}`, 'warn');
+            noteFatalBrowserError(error);
             return { ok: false, error };
         }
     }).finally(() => { serverInFlight = null; });
@@ -491,7 +537,8 @@ function refresh() {
             return { ok: true, snapshot, alerts, published };
         } catch (error) {
             if (snapshot) snapshot.error = error.message;
-            console.warn('Netquel board refresh failed:', error.message);
+            record(`Netquel board refresh failed: ${error.message}`, 'warn');
+            noteFatalBrowserError(error);
             return { ok: false, error };
         }
     }).finally(() => { inFlight = null; });
@@ -522,16 +569,65 @@ function scheduleServers(delayMs) {
     if (typeof serverTimer.unref === 'function') serverTimer.unref();
 }
 
-function startNetquelTracker(client) {
-    clientRef = client;
-    // Site tables first: the board message exists within seconds, and the
-    // slower server sweep fills its per-server embed when it lands.
+/* Site tables first: the board message exists within seconds, and the slower
+ * server sweep fills its per-server embed when it lands. */
+function armTracker() {
     scheduleSite(5_000);
     scheduleServers(BOOT_DELAY_MS);
-    console.log(
+    record(
         `🛰️ Netquel tracker armed — site tables every ${SITE_REFRESH_MINUTES} minute(s), `
         + `server sweep every ${SERVER_REFRESH_MINUTES} minute(s).`
     );
+}
+
+function reportMissingBrowser(detail) {
+    record(
+        '🛰️ Netquel tracker disabled — no Chrome/Chromium found on this host.\n'
+        + `   ${detail}\n`
+        + '   Install one (for example `npx puppeteer browsers install chrome`) and set\n'
+        + '   NETQUEL_CHROME_PATH to the binary, then restart. Everything else still runs.\n'
+        + `   Diagnostics: ${LOG_PATH} — NETQUEL-HOSTING.md shows the no-console routes.`,
+        'warn'
+    );
+}
+
+/*
+ * Hosts frequently ship without a browser, and panels that only restart the
+ * process never run `npm install`, so the postinstall hook alone is not enough.
+ * On boot with no browser at all we try the same installer once ourselves;
+ * if it lands, the tracker arms without a second restart.
+ */
+function startNetquelTracker(client) {
+    clientRef = client;
+
+    const found = source.locateChrome();
+    if (found) {
+        record(`🛰️ Netquel browser: ${found}`);
+        armTracker();
+        return;
+    }
+
+    if (process.platform !== 'linux') {
+        reportMissingBrowser(`Nothing was installed: this host is ${process.platform}, so the local download is skipped.`);
+        return;
+    }
+
+    record('🛰️ Netquel tracker: no browser found — downloading one now (this can take a minute).', 'warn');
+    browserInstall = ensureChrome(message => record(`🛰️ ${message}`))
+        .then(result => {
+            if (result.ok && result.path) {
+                record(`🛰️ Netquel browser ready: ${result.path}`);
+                armTracker();
+                return;
+            }
+            disabledReason = result.message;
+            reportMissingBrowser(result.message);
+        })
+        .catch(error => {
+            disabledReason = String(error?.message ?? error);
+            reportMissingBrowser(`Install attempt failed: ${disabledReason}`);
+        })
+        .finally(() => { browserInstall = null; });
 }
 
 function stopNetquelTracker() {
@@ -552,6 +648,8 @@ module.exports = {
     SERVER_REFRESH_MINUTES,
     startNetquelTracker,
     stopNetquelTracker,
+    netquelLogPath: LOG_PATH,
+    trackerDisabledReason: () => disabledReason,
     refresh,
     refreshSite,
     refreshServers,

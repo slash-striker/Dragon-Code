@@ -16,3 +16,9 @@ node_modules/
 # Local project/tool settings
 .codezal/
 .freebuff/
+
+# Chrome downloaded by scripts/install-netquel-chrome.js
+.netquel-chrome/
+
+# Netquel tracker boot/failure diagnostics (written for hosts without a console)
+netquel-tracker.log

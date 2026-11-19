@@ -16,7 +16,303 @@ const LIGHT_USER_ID = '1543876836209991682';
  * be here momentarily" response instead. Both are suppressed when the target
  * user (1505829367631183963) is mentioned — that gets a 👀 only.
  */
-const KEYWORDS = ['dawg', 'DAWG', 'sassy', 'slashstriker', 'slash striker', 'Slashstriker', 'SlashStriker', 'SLASH', 'slashy', 'salshy', 'slishy', 'slash', 'striker', 'salsh', 'slahs', 'Slahs', 'Slash', 'lsash', 'str1ker', 'スラッシー', 'Slasy', 'sslash', 'aslash', 'zzslash', 'zslash', 'slasht', 'slashstr1ker_', 'str1ker', 'slhs', 'sl;ash', 'sl;sh', 'sla;sh', 's;lash', 's;ash', 's;las', 's;lsah', 's;lsah', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 'slas;h', 'slas;h', 'sl;ash', 's;lash', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 's;lashy', 'sas', 'sus', 'soos', 'soosssy', 'sossy', 'soossy', 'soosy', 'saaassssssyyyyyyy', 'sasssyyy', 'saassyy', 'ssaassyy', 'saaaasssssssyyy', 'the one with no gf', 'no gf', 'one with no gf', 'one with no girlfriend', 'no girlfriend', 'sassyfraslebuns', 'sassyfrazlebunz', 'sassyfraslebunz'];
+
+const KEYWORDS = [
+  // Original names and variations
+  'dawg',
+  'DAWG',
+  'sassy',
+  'slashstriker',
+  'slash striker',
+  'Slashstriker',
+  'SlashStriker',
+  'SLASH',
+  'slashy',
+  'salshy',
+  'slishy',
+  'slash',
+  'striker',
+  'salsh',
+  'slahs',
+  'Slahs',
+  'Slash',
+  'lsash',
+  'str1ker',
+  'スラッシー',
+  'Slasy',
+  'sslash',
+  'aslash',
+  'zzslash',
+  'zslash',
+  'slasht',
+  'slashty',
+  'slashstr1ker_',
+  'slhs',
+  'sl;ash',
+  'sl;sh',
+  'sla;sh',
+  's;lash',
+  's;ash',
+  's;las',
+  's;lsah',
+  's;ashy',
+  's;lasy',
+  's;lahy',
+  'slashie',
+  's;lay',
+  's;lasyh',
+  's;lhsay',
+  's;lyas',
+  's;lafjs',
+  's;luesy',
+  'slas;h',
+  's;lashy',
+  'S;lashy',
+  's;lsshy',
+  's;lashhy',
+  's;lashyy',
+
+  // Slash variations
+  'slashy',
+  'slashie',
+  'slashy_',
+  '_slashy',
+  'slashyy',
+  'slashyyy',
+  'slashi',
+  'slashey',
+  'slashe',
+  'slashee',
+  'slasher',
+  'slashers',
+  'slasherz',
+  'slashr',
+  'slasherr',
+  'slasherrr',
+  'slashh',
+  'slashhh',
+  'slassh',
+  'slasshy',
+  'slahsy',
+  'slahshy',
+  'slah',
+  'slach',
+  'slachy',
+  'slazhy',
+  'slazhy',
+  'slaxy',
+  'slaxhy',
+  'slay',
+  'slayy',
+  'slayyy',
+  'slays',
+  'slayzy',
+  'sllashy',
+  'sslashy',
+  'ssslashy',
+  'zslashy',
+  'zzslashy',
+  'xslash',
+  'xslashy',
+  'slashhie',
+  'slashii',
+  'slashiii',
+  'slashyie',
+  'slashster',
+
+  // Striker variations
+  'striker',
+  'Striker',
+  'STRIKER',
+  'str1ker',
+  'Str1ker',
+  'STR1KER',
+  'strik3r',
+  'strikerz',
+  'strikerr',
+  'strikerrr',
+  'striker_',
+  '_striker',
+  'strikerx',
+  'strikerxx',
+  'strikery',
+  'strikie',
+  'striky',
+  'strikyy',
+  'strikr',
+  'strikr1',
+  'strikr_',
+  'strik3rz',
+  'str1k3r',
+  'str1kerr',
+  'strikerzz',
+
+  // Slashstriker variations
+  'slashstriker',
+  'SlashStriker',
+  'Slashstriker',
+  'SLASHSTRIKER',
+  'slash striker',
+  'slash-striker',
+  'slash_striker',
+  'slashstr1ker',
+  'slashstrik3r',
+  'slashstrikerr',
+  'slashstrikerrr',
+  'slashstriker1',
+  'slashstriker_',
+  '_slashstriker',
+  'slashstrikerx',
+  'slashstrikerz',
+  'slashstrikerzz',
+  'slashstrikery',
+  'slashstrikr',
+  'slshstriker',
+  'slahstriker',
+  'salshstriker',
+  'sslashstriker',
+  'slashstrik',
+  'slashstrikerr',
+  'slashstr1k3r',
+
+  // Keyboard typos and symbol variations
+  's;lash',
+  'sl;ash',
+  'sla;sh',
+  'slas;h',
+  's;lashy',
+  's;lasy',
+  's;lashyy',
+  's;lashhy',
+  's;lsah',
+  's;lahy',
+  's;ashy',
+  's;lay',
+  's;lyas',
+  's;lhsay',
+  's;lasyh',
+  's;lsshy',
+  's;luesy',
+  's;lafjs',
+  'sl;sh',
+  'sl;ashy',
+  'slaashy',
+  'slasshy',
+  'sllashy',
+  'sllash',
+  'slahs',
+  'slahsy',
+  'lsash',
+  'lsashy',
+  'salsh',
+  'salshy',
+  'sals hy',
+  'salshey',
+  'salsashy',
+  'aslash',
+  'aslashy',
+  'zslash',
+  'zzslash',
+  'xslash',
+  'slashh',
+  'sslash',
+  'sslashy',
+
+  // Sassy variations
+  'sassy',
+  'Sassy',
+  'SASSY',
+  'sasy',
+  'sasie',
+  'sassie',
+  'sassey',
+  'sassy_',
+  '_sassy',
+  'sassyy',
+  'sassyyy',
+  'sassyyyy',
+  'sasssy',
+  'sasssyy',
+  'sasssyyy',
+  'saassy',
+  'saasssy',
+  'ssaassy',
+  'ssaassyy',
+  'saaaassy',
+  'saaaasssy',
+  'saaassssssyyyyyyy',
+  'sassyyyyy',
+  'sassyyyyyy',
+  'sassyie',
+  'sassieh',
+  'sasssyyy',
+  'sassyx',
+  'sassyxx',
+  'sassyxo',
+  'sassyboo',
+  'sassykins',
+  'sassyfras',
+  'sassyfrass',
+  'sassyfrassy',
+
+  // Shortened and slang variations
+  'sas',
+  'sassyf',
+  'sazzy',
+  'sazzyy',
+  'sazzyyy',
+  'sassyah',
+  'sassah',
+  'sassss',
+  'sassssss',
+  'saaas',
+  'saassyy',
+  'ssaassyy',
+  'saaaasssssssyyy',
+  'sasssyyy',
+
+  // Nicknames and phrases
+  'the one with no gf',
+  'one with no gf',
+  'one with no girlfriend',
+  'no girlfriend',
+  'nogf',
+  'no_gf',
+  'no-gf',
+  'nogirlfriend',
+  'no_girlfriend',
+  'no-girlfriend',
+  'the one with no girlfriend',
+  'the one without a gf',
+  'the one without a girlfriend',
+  'without a gf',
+  'without girlfriend',
+  'without a girlfriend',
+
+  // Sassyfras variations
+  'sassyfraslebuns',
+  'sassyfrazlebunz',
+  'sassyfraslebunz',
+  'sassyfras',
+  'sassyfraz',
+  'sassyfrass',
+  'sassyfraslebun',
+  'sassyfraslebunzz',
+  'sassyfraslebuns_',
+  'sassyfraslebunz_',
+  'sassyfrazlebuns',
+  'sassyfrazlebun',
+  'sassyfrazlebunzz',
+  'sassyfrazlebuns_',
+  'sassyfrazlebunz_',
+  'sassyfraslebunzzz',
+  'sassyfrazlebunzzz',
+  'sassyfraslebunzs',
+  'sassyfrazlebunzs',
+  'sassyfraslebunzx',
+  'sassyfrazlebunzx'
+];
+
 
 /*
  * ⚡ Light's own summon keywords — same fuzzy one-edit matching as SLASH's,
@@ -26,12 +322,22 @@ const KEYWORDS = ['dawg', 'DAWG', 'sassy', 'slashstriker', 'slash striker', 'Sla
 const LIGHT_KEYWORDS = ['light', "grok", "GROK", "grko", "gork", "orgk"];
 
 /*
+ * Message text is lowercased before matching, so the trigger lists must be
+ * lowercased too — otherwise "SLASH", "SlashStriker" or "I need help" in the
+ * list could never match what anyone types. Deduped after folding so the case
+ * variants above collapse into one entry and the hot matching loop stays small.
+ */
+const UNIQUE_KEYWORDS = [...new Set(KEYWORDS.map(keyword => keyword.toLowerCase()))];
+const UNIQUE_LIGHT_KEYWORDS = [...new Set(LIGHT_KEYWORDS.map(keyword => keyword.toLowerCase()))];
+
+/*
  * Multi-word triggers — matched as an exact consecutive word pair/phrase
  * anywhere in the message ("can you help me build this" fires; the fuzzy
  * one-edit tolerance deliberately does NOT apply to phrases so random
  * sentences can't summon him).
  */
 const PHRASES = ['help me', 'are you there', 'need slash', 'summon slash', 'where is slash', 'I need help', 'someone help me', 'pls delete', 'scam links', 'scam link', 'scam photos', 'scam image'];
+const UNIQUE_PHRASES = [...new Set(PHRASES.map(phrase => phrase.toLowerCase()))];
 
 /*
  * 📦 Panels are PLAIN TEXT now — no embeds — so they stay small and don't
@@ -237,7 +543,7 @@ function checkPingRate(userId) {
     }
 }
 
-function findKeyword(content, keywords = KEYWORDS, phrases = PHRASES, options = {}) {
+function findKeyword(content, keywords = UNIQUE_KEYWORDS, phrases = UNIQUE_PHRASES, options = {}) {
     const { exactOnly = false } = options;
     if (!content) return null;
     const words = content.toLowerCase().match(/[a-z]+/g) ?? [];
@@ -466,6 +772,8 @@ function buildMomentaryPanel(state, targetUserId = OWNER_USER_ID) {
 
 module.exports = {
     name: Events.MessageCreate,
+    KEYWORDS,
+    UNIQUE_KEYWORDS,
     findKeyword,
     slashPingEnabled,
     checkPingRate,
@@ -527,7 +835,7 @@ module.exports = {
             const lightPinged = mentionedUserIds.includes(LIGHT_USER_ID) && repliedUserId !== LIGHT_USER_ID;
 
             const slashKeyword = findKeyword(message.content);
-            const lightKeyword = findKeyword(message.content, LIGHT_KEYWORDS, [], { exactOnly: true });
+            const lightKeyword = findKeyword(message.content, UNIQUE_LIGHT_KEYWORDS, [], { exactOnly: true });
 
             const ownerWantsSummon = ownerPinged || Boolean(slashKeyword);
             const lightWantsSummon = lightPinged || Boolean(lightKeyword);

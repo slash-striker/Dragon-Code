@@ -53,7 +53,11 @@ module.exports = {
                         `\`\`\`${String(result.error?.message ?? result.error).slice(0, 1500)}\`\`\``,
                         `Last good scrape: ${last}.`
                     ].join('\n\n'))
-                    .setFooter({ text: 'Retrying automatically in 2 minutes' })]
+                    .setFooter({
+                        text: service.trackerDisabledReason()
+                            ? 'Tracker is disabled — see NETQUEL-HOSTING.md'
+                            : 'Retrying automatically in 2 minutes'
+                    })]
             }).catch(() => null);
         }
 
