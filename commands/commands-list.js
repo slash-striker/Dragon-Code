@@ -40,6 +40,7 @@ const COMMAND_CATEGORIES = {
             { name: '/blackjack', desc: 'Play blackjack against the dealer: Only in Blackjack Thread in Party Games channel' },
             { name: '/games', desc: 'Every minigame in one slot — pick 5dice, hangman, highlow, lightsout, mastermind, matchpairs, rps, or tictactoe' },
             { name: '/uno-play', desc: 'Open an UNO table — wilds, +2/+4, Normal/Stack/Spicy rules (UNO channel only)' },
+            { name: '/play-cards', desc: 'Play Golf — 2-4 players, four hidden cards each, swap or knock, lowest hand wins' },
             { name: '/scratchcard', desc: 'Buy and scratch cards for prizes' },
             { name: '/casino', desc: 'Casino rules + your summary (pick action)' },
             { name: '/roulette', desc: 'One-shot American roulette — /roulette amount:<#> bet_type:<color/area> or number:<0-36>' },
