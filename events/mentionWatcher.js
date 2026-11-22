@@ -20,12 +20,11 @@ const LIGHT_USER_ID = '1543876836209991682';
 const KEYWORDS = [
   // Original names and variations
   'dawg',
-  'DAWG',
   'sassy',
   'slashstriker',
   'slash striker',
-  'Slashstriker',
-  'SlashStriker',
+  'slashostriker',
+  'llashStriker',
   'SLASH',
   'slashy',
   'salshy',
@@ -34,12 +33,12 @@ const KEYWORDS = [
   'striker',
   'salsh',
   'slahs',
-  'Slahs',
-  'Slash',
+  'slahs',
+  'slash',
   'lsash',
   'str1ker',
   'スラッシー',
-  'Slasy',
+  'slasy',
   'sslash',
   'aslash',
   'zzslash',
@@ -125,8 +124,6 @@ const KEYWORDS = [
   'Striker',
   'STRIKER',
   'str1ker',
-  'Str1ker',
-  'STR1KER',
   'strik3r',
   'strikerz',
   'strikerr',
@@ -149,9 +146,6 @@ const KEYWORDS = [
 
   // Slashstriker variations
   'slashstriker',
-  'SlashStriker',
-  'Slashstriker',
-  'SLASHSTRIKER',
   'slash striker',
   'slash-striker',
   'slash_striker',
@@ -275,6 +269,7 @@ const KEYWORDS = [
   'the one with no gf',
   'one with no gf',
   'one with no girlfriend',
+  'One with no girlfriend',
   'no girlfriend',
   'nogf',
   'no_gf',
@@ -288,6 +283,13 @@ const KEYWORDS = [
   'without a gf',
   'without girlfriend',
   'without a girlfriend',
+  'No gf',
+
+  'No girlfriend',
+  'No_girlfriend',
+  'slashislashiefrazzie',
+  'Shashysassy',
+  'Slashybashybunchkins',
 
   // Sassyfras variations
   'sassyfraslebuns',
@@ -461,7 +463,13 @@ function withinOneEdit(a, b) {
     return d[lenA][lenB] <= 1;
 }
 
-const MIN_FUZZY_WORD_LENGTH = 4;
+/*
+ * Five, not four: at four, ordinary words collided with short aliases
+ * ("play" is one edit from "slay") and summoned the owner by accident.
+ * Short keywords still fire when typed exactly; only fuzzy matching skips
+ * them, and the explicit variant lists cover the common spellings.
+ */
+const MIN_FUZZY_WORD_LENGTH = 5;
 
 /*
  * 🚫 PING-RATE LIMITER — spam protection for BOTH summon systems.
