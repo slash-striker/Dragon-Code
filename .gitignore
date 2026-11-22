@@ -20,5 +20,14 @@ node_modules/
 # Chrome downloaded by scripts/install-netquel-chrome.js
 .netquel-chrome/
 
+# Resident Netquel site browser profile (WASM/HTTP cache, recreated on boot)
+.netquel-site-profile/
+
+# Resident Netquel in-game browser profile (WASM/HTTP cache, recreated on boot)
+.netquel-sweep-profile/
+
+# Resident Netquel live-board tabs (WASM/HTTP cache, recreated on boot)
+.netquel-resident-profile/
+
 # Netquel tracker boot/failure diagnostics (written for hosts without a console)
 netquel-tracker.log
